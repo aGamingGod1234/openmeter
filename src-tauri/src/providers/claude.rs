@@ -1,4 +1,5 @@
 use super::{http, Metric, Snapshot};
+use crate::accounts::{AccountContext, AccountSource};
 use chrono::{DateTime, Utc};
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -16,14 +17,32 @@ fn creds_path() -> PathBuf {
 }
 
 pub async fn snapshot() -> Snapshot {
-    match fetch().await {
+    match fetch(creds_path()).await {
         Ok(s) => s,
         Err(e) => Snapshot::error(ID, NAME, e),
     }
 }
 
-async fn fetch() -> Result<Snapshot, String> {
-    let path = creds_path();
+pub async fn snapshot_for(account: &AccountContext) -> Snapshot {
+    let path = match &account.source {
+        AccountSource::DefaultHome => creds_path(),
+        AccountSource::Directory { path } if path.is_file() => path.clone(),
+        AccountSource::Directory { path } => path.join(".credentials.json"),
+        AccountSource::Manual => {
+            return Snapshot::no_credentials(
+                &account.card_id,
+                &account.display_name,
+                "Claude accounts require a Claude Code credential directory.",
+            )
+        }
+    };
+    match fetch(path).await {
+        Ok(snapshot) => snapshot,
+        Err(error) => Snapshot::error(&account.card_id, &account.display_name, error),
+    }
+}
+
+async fn fetch(path: PathBuf) -> Result<Snapshot, String> {
     if !path.exists() {
         return Ok(Snapshot::no_credentials(
             ID,
@@ -33,7 +52,8 @@ async fn fetch() -> Result<Snapshot, String> {
     }
 
     let raw = std::fs::read_to_string(&path).map_err(|e| format!("read credentials: {e}"))?;
-    let mut doc: Value = serde_json::from_str(&raw).map_err(|e| format!("parse credentials: {e}"))?;
+    let mut doc: Value =
+        serde_json::from_str(&raw).map_err(|e| format!("parse credentials: {e}"))?;
     let oauth = doc
         .get("claudeAiOauth")
         .cloned()
@@ -59,7 +79,9 @@ async fn fetch() -> Result<Snapshot, String> {
     let now_ms = Utc::now().timestamp_millis();
     if access.is_empty() || expires_at <= now_ms + 60_000 {
         if refresh.is_empty() {
-            return Err("token expired and no refresh token present — run `claude` and log in again".into());
+            return Err(
+                "token expired and no refresh token present — run `claude` and log in again".into(),
+            );
         }
         let resp = http()
             .post("https://platform.claude.com/v1/oauth/token")
@@ -86,7 +108,10 @@ async fn fetch() -> Result<Snapshot, String> {
             }
             return Err(format!("token refresh failed: HTTP {status}"));
         }
-        let tok: Value = resp.json().await.map_err(|e| format!("token refresh parse: {e}"))?;
+        let tok: Value = resp
+            .json()
+            .await
+            .map_err(|e| format!("token refresh parse: {e}"))?;
         let new_access = tok
             .get("access_token")
             .and_then(Value::as_str)
@@ -97,7 +122,10 @@ async fn fetch() -> Result<Snapshot, String> {
             .and_then(Value::as_str)
             .unwrap_or(&refresh)
             .to_string();
-        let expires_in = tok.get("expires_in").and_then(Value::as_i64).unwrap_or(3600);
+        let expires_in = tok
+            .get("expires_in")
+            .and_then(Value::as_i64)
+            .unwrap_or(3600);
 
         access = new_access.clone();
 
@@ -135,9 +163,7 @@ async fn fetch() -> Result<Snapshot, String> {
                 .and_then(|v| v.to_str().ok())
                 .and_then(|v| v.parse::<u64>().ok())
             {
-                return Err(format!(
-                    "usage endpoint: HTTP 429 (retry_after_s={secs})"
-                ));
+                return Err(format!("usage endpoint: HTTP 429 (retry_after_s={secs})"));
             }
         }
         return Err(format!("usage endpoint: HTTP {}", resp.status()));
@@ -149,32 +175,53 @@ async fn fetch() -> Result<Snapshot, String> {
     let mut metrics = Vec::new();
     push_window(&mut metrics, usage.get("five_hour"), "Session", 5 * HOUR);
     push_window(&mut metrics, usage.get("seven_day"), "Weekly", 7 * DAY);
-    push_window(&mut metrics, usage.get("seven_day_sonnet"), "Sonnet weekly", 7 * DAY);
-    push_window(&mut metrics, usage.get("seven_day_opus"), "Opus weekly", 7 * DAY);
+    push_window(
+        &mut metrics,
+        usage.get("seven_day_sonnet"),
+        "Sonnet weekly",
+        7 * DAY,
+    );
+    push_window(
+        &mut metrics,
+        usage.get("seven_day_opus"),
+        "Opus weekly",
+        7 * DAY,
+    );
 
     // Newer per-model weeklies (Fable era) live in a `limits` array instead of
     // legacy `seven_day_<model>` keys. Add any we don't already show.
-    for entry in usage.get("limits").and_then(Value::as_array).unwrap_or(&vec![]) {
+    for entry in usage
+        .get("limits")
+        .and_then(Value::as_array)
+        .unwrap_or(&vec![])
+    {
         if entry.get("kind").and_then(Value::as_str) != Some("weekly_scoped") {
             continue;
         }
-        let Some(name) = entry.pointer("/scope/model/display_name").and_then(Value::as_str) else {
+        let Some(name) = entry
+            .pointer("/scope/model/display_name")
+            .and_then(Value::as_str)
+        else {
             continue;
         };
-        let Some(percent) = entry.get("percent").and_then(Value::as_f64) else { continue };
+        let Some(percent) = entry.get("percent").and_then(Value::as_f64) else {
+            continue;
+        };
         let label = format!("{name} weekly");
         if metrics.iter().any(|m| m.label == label) {
             continue;
         }
         let resets_at = parse_reset(entry.get("resets_at"));
-        metrics
-            .push(Metric::progress(&label, percent, None).with_reset(resets_at, Some(7 * DAY)));
+        metrics.push(Metric::progress(&label, percent, None).with_reset(resets_at, Some(7 * DAY)));
     }
 
     // Extra Usage: pay-as-you-go overage spend, in cents. Bounded meter when
     // a monthly cap is set, plain dollars when uncapped, absent when unused.
     if let Some(extra) = usage.get("extra_usage") {
-        let enabled = extra.get("is_enabled").and_then(Value::as_bool).unwrap_or(false);
+        let enabled = extra
+            .get("is_enabled")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         let used_cents = extra.get("used_credits").and_then(Value::as_f64);
         if enabled {
             if let Some(used_cents) = used_cents {
@@ -206,10 +253,16 @@ async fn fetch() -> Result<Snapshot, String> {
 /// `resets_at` arrives as ISO-8601 or epoch (seconds when < 1e10, else ms).
 fn parse_reset(v: Option<&Value>) -> Option<i64> {
     match v? {
-        Value::String(s) => DateTime::parse_from_rfc3339(s).ok().map(|dt| dt.timestamp_millis()),
+        Value::String(s) => DateTime::parse_from_rfc3339(s)
+            .ok()
+            .map(|dt| dt.timestamp_millis()),
         Value::Number(n) => {
             let n = n.as_f64()?;
-            Some(if n.abs() < 1e10 { (n * 1000.0) as i64 } else { n as i64 })
+            Some(if n.abs() < 1e10 {
+                (n * 1000.0) as i64
+            } else {
+                n as i64
+            })
         }
         _ => None,
     }
@@ -217,7 +270,9 @@ fn parse_reset(v: Option<&Value>) -> Option<i64> {
 
 fn push_window(metrics: &mut Vec<Metric>, node: Option<&Value>, label: &str, period_ms: i64) {
     let Some(node) = node else { return };
-    let Some(used) = node.get("utilization").and_then(Value::as_f64) else { return };
+    let Some(used) = node.get("utilization").and_then(Value::as_f64) else {
+        return;
+    };
     let resets_at = parse_reset(node.get("resets_at"));
     metrics.push(Metric::progress(label, used, None).with_reset(resets_at, Some(period_ms)));
 }

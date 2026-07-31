@@ -303,8 +303,23 @@ pub fn runtime_for(provider_id: &str) -> Option<ProviderRuntime> {
     Some(ProviderRuntime::new(
         id,
         |account| Ok(account_credential_material(account)),
-        move |_account, _credential| legacy_snapshot(id),
+        move |account, _credential| account_snapshot(id, account.clone()),
     ))
+}
+
+fn account_snapshot(provider_id: &'static str, account: AccountContext) -> ProviderFetchFuture {
+    match provider_id {
+        "claude" => Box::pin(async move { claude::snapshot_for(&account).await }),
+        "codex" => Box::pin(async move { codex::snapshot_for(&account).await }),
+        _ if matches!(account.source, AccountSource::DefaultHome) => legacy_snapshot(provider_id),
+        _ => Box::pin(async move {
+            ProviderSnapshot::no_credentials(
+                &account.card_id,
+                &account.display_name,
+                "This provider needs its default CLI profile on Windows.",
+            )
+        }),
+    }
 }
 
 fn legacy_snapshot(provider_id: &'static str) -> ProviderFetchFuture {

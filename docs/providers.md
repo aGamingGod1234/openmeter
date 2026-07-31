@@ -15,6 +15,21 @@ Ground rules that apply to every provider:
   endpoint and written back to the CLI's credential file, keeping the CLI
   signed in — identical to what the CLI does itself.
 
+Account and credential safety:
+
+- Every refresh runs through the same account-aware runtime boundary. The
+  account's credential source is fingerprinted with SHA-256 for cache
+  isolation; credential bytes are never stored in snapshots or the account
+  registry.
+- Errors, warnings, plan names, and metric text are sanitized before a
+  snapshot reaches the disk cache, local HTTP API, CLI JSON, or dashboard.
+  Tokens, API keys, email addresses, and Windows user-profile paths are
+  replaced with explicit redaction markers.
+- The default card reads the normal CLI location. Named cards use a stable
+  `provider--account` identity and may point at an isolated credential
+  directory or a manually managed key. A credential change invalidates only
+  that card's cache.
+
 ---
 
 ## Claude (Claude Code)

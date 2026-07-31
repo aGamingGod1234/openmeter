@@ -1,4 +1,5 @@
 use super::{http, Metric, Snapshot};
+use crate::accounts::{AccountContext, AccountSource};
 use base64::Engine;
 use chrono::Utc;
 use serde_json::{json, Value};
@@ -27,9 +28,28 @@ fn jwt_claims(token: &str) -> Option<Value> {
 }
 
 pub async fn snapshot() -> Snapshot {
-    match fetch().await {
+    match fetch(auth_path()).await {
         Ok(s) => s,
         Err(e) => Snapshot::error(ID, NAME, e),
+    }
+}
+
+pub async fn snapshot_for(account: &AccountContext) -> Snapshot {
+    let path = match &account.source {
+        AccountSource::DefaultHome => auth_path(),
+        AccountSource::Directory { path } if path.is_file() => path.clone(),
+        AccountSource::Directory { path } => path.join("auth.json"),
+        AccountSource::Manual => {
+            return Snapshot::no_credentials(
+                &account.card_id,
+                &account.display_name,
+                "Codex accounts require a Codex CLI credential directory.",
+            )
+        }
+    };
+    match fetch(path).await {
+        Ok(snapshot) => snapshot,
+        Err(error) => Snapshot::error(&account.card_id, &account.display_name, error),
     }
 }
 
@@ -42,7 +62,10 @@ struct Access {
 /// Loads (and if needed refreshes + writes back) the Codex OAuth access
 /// token. Shared by the usage fetch and the reset-credit redeem command.
 async fn load_access() -> Result<Access, String> {
-    let path = auth_path();
+    load_access_from(&auth_path()).await
+}
+
+async fn load_access_from(path: &std::path::Path) -> Result<Access, String> {
     let raw = std::fs::read_to_string(&path).map_err(|e| format!("read auth.json: {e}"))?;
     let mut doc: Value = serde_json::from_str(&raw).map_err(|e| format!("parse auth.json: {e}"))?;
     let tokens = doc
@@ -91,7 +114,9 @@ async fn load_access() -> Result<Access, String> {
         .unwrap_or(0);
     if access.is_empty() || exp <= Utc::now().timestamp() + 60 {
         if refresh.is_empty() {
-            return Err("access token expired and no refresh token — run `codex login` again".into());
+            return Err(
+                "access token expired and no refresh token — run `codex login` again".into(),
+            );
         }
         let resp = http()
             .post("https://auth.openai.com/oauth/token")
@@ -107,7 +132,10 @@ async fn load_access() -> Result<Access, String> {
         if !resp.status().is_success() {
             return Err(format!("token refresh failed: HTTP {}", resp.status()));
         }
-        let tok: Value = resp.json().await.map_err(|e| format!("token refresh parse: {e}"))?;
+        let tok: Value = resp
+            .json()
+            .await
+            .map_err(|e| format!("token refresh parse: {e}"))?;
         let new_access = tok
             .get("access_token")
             .and_then(Value::as_str)
@@ -135,18 +163,22 @@ async fn load_access() -> Result<Access, String> {
         }
     }
 
-    Ok(Access { token: access, account_id, plan })
+    Ok(Access {
+        token: access,
+        account_id,
+        plan,
+    })
 }
 
-async fn fetch() -> Result<Snapshot, String> {
-    if !auth_path().exists() {
+async fn fetch(path: PathBuf) -> Result<Snapshot, String> {
+    if !path.exists() {
         return Ok(Snapshot::no_credentials(
             ID,
             NAME,
             "Codex sign-in not found. Run `codex login` in a terminal.",
         ));
     }
-    let auth = load_access().await?;
+    let auth = load_access_from(&path).await?;
     let (access, account_id) = (auth.token, auth.account_id);
     let mut plan = auth.plan;
 
@@ -156,7 +188,10 @@ async fn fetch() -> Result<Snapshot, String> {
     if !account_id.is_empty() {
         req = req.header("chatgpt-account-id", &account_id);
     }
-    let resp = req.send().await.map_err(|e| format!("usage request: {e}"))?;
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| format!("usage request: {e}"))?;
     if !resp.status().is_success() {
         return Err(format!("usage endpoint: HTTP {}", resp.status()));
     }
@@ -169,17 +204,24 @@ async fn fetch() -> Result<Snapshot, String> {
         .unwrap_or(&usage);
     push_window(
         &mut metrics,
-        rate_limits.get("primary_window").or_else(|| rate_limits.get("primary")),
+        rate_limits
+            .get("primary_window")
+            .or_else(|| rate_limits.get("primary")),
         "Session",
     );
     push_window(
         &mut metrics,
-        rate_limits.get("secondary_window").or_else(|| rate_limits.get("secondary")),
+        rate_limits
+            .get("secondary_window")
+            .or_else(|| rate_limits.get("secondary")),
         "Weekly",
     );
     // Spark (a separate metered model family) lives in additional_rate_limits;
     // only the spark entry is shown, matching the Mac app.
-    if let Some(extra_limits) = usage.get("additional_rate_limits").and_then(Value::as_array) {
+    if let Some(extra_limits) = usage
+        .get("additional_rate_limits")
+        .and_then(Value::as_array)
+    {
         let spark = extra_limits.iter().find(|e| {
             ["limit_name", "metered_feature"].iter().any(|k| {
                 e.get(*k)
@@ -200,8 +242,11 @@ async fn fetch() -> Result<Snapshot, String> {
         .pointer("/credits/balance")
         .and_then(Value::as_f64)
         .or_else(|| {
-            (usage.pointer("/credits/has_credits").and_then(Value::as_bool) == Some(false))
-                .then_some(0.0)
+            (usage
+                .pointer("/credits/has_credits")
+                .and_then(Value::as_bool)
+                == Some(false))
+            .then_some(0.0)
         });
     if let Some(balance) = credit_balance {
         let credits = balance.floor().max(0.0);
@@ -329,7 +374,10 @@ pub async fn redeem_credit(credit_id: &str) -> Result<String, String> {
     if !auth.account_id.is_empty() {
         req = req.header("chatgpt-account-id", &auth.account_id);
     }
-    let resp = req.send().await.map_err(|e| format!("consume request: {e}"))?;
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| format!("consume request: {e}"))?;
     let status = resp.status();
     let body: Value = resp.json().await.unwrap_or_else(|_| json!({}));
     if !status.is_success() {
@@ -340,9 +388,15 @@ pub async fn redeem_credit(credit_id: &str) -> Result<String, String> {
             .unwrap_or("request failed");
         return Err(format!("HTTP {status}: {msg}"));
     }
-    let windows = body.get("windows_reset").and_then(Value::as_i64).unwrap_or(0);
+    let windows = body
+        .get("windows_reset")
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
     Ok(if windows > 0 {
-        format!("Codex limits reset ({windows} window{})", if windows == 1 { "" } else { "s" })
+        format!(
+            "Codex limits reset ({windows} window{})",
+            if windows == 1 { "" } else { "s" }
+        )
     } else {
         "Reset credit redeemed".to_string()
     })
@@ -358,13 +412,24 @@ fn push_window_labeled(metrics: &mut Vec<Metric>, node: Option<&Value>, label: &
     push_window_inner(metrics, node, label, true);
 }
 
-fn push_window_inner(metrics: &mut Vec<Metric>, node: Option<&Value>, label_in: &str, forced: bool) {
+fn push_window_inner(
+    metrics: &mut Vec<Metric>,
+    node: Option<&Value>,
+    label_in: &str,
+    forced: bool,
+) {
     let Some(node) = node else { return };
-    let Some(used) = node.get("used_percent").and_then(Value::as_f64) else { return };
+    let Some(used) = node.get("used_percent").and_then(Value::as_f64) else {
+        return;
+    };
     let window_seconds = node
         .get("limit_window_seconds")
         .and_then(Value::as_i64)
-        .or_else(|| node.get("window_minutes").and_then(Value::as_i64).map(|m| m * 60));
+        .or_else(|| {
+            node.get("window_minutes")
+                .and_then(Value::as_i64)
+                .map(|m| m * 60)
+        });
     let label = if forced {
         label_in
     } else {
@@ -376,7 +441,11 @@ fn push_window_inner(metrics: &mut Vec<Metric>, node: Option<&Value>, label_in: 
     };
     let period_ms = window_seconds
         .map(|s| s * 1000)
-        .unwrap_or(if label.contains("Weekly") { 7 * 86_400_000 } else { 5 * 3_600_000 });
+        .unwrap_or(if label.contains("Weekly") {
+            7 * 86_400_000
+        } else {
+            5 * 3_600_000
+        });
     let now_ms = Utc::now().timestamp_millis();
     let resets_at = node
         .get("reset_at")

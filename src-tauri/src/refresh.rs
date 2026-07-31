@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex, OnceLock};
 
-use crate::accounts::AccountContext;
+use crate::accounts::{AccountContext, AccountRegistry};
 use crate::cache::SnapshotCache;
 use crate::providers::{self, ProviderSnapshot};
 
@@ -296,15 +296,43 @@ impl CliOptions {
 }
 
 pub fn default_targets(disabled: &[String]) -> Vec<RefreshTarget> {
-    providers::provider_catalog()
+    let mut accounts: Vec<AccountContext> = providers::provider_catalog()
         .iter()
-        .filter(|descriptor| !disabled.iter().any(|id| id == descriptor.id))
-        .filter_map(|descriptor| {
-            let account = AccountContext::default_for(descriptor.id).ok()?;
-            let runtime = providers::runtime_for(descriptor.id)?;
-            let stamp = runtime.probe(&account).ok()?.credential_stamp;
+        .filter_map(|descriptor| AccountContext::default_for(descriptor.id).ok())
+        .collect();
+    let registry_path = providers::config_dir().join("accounts-v1.json");
+    if let Ok(registry) = AccountRegistry::load(&registry_path) {
+        for account in registry.accounts() {
+            if let Some(position) = accounts
+                .iter()
+                .position(|existing| existing.card_id == account.card_id)
+            {
+                accounts[position] = account.clone();
+            } else {
+                accounts.push(account.clone());
+            }
+        }
+    }
+    targets_for_accounts(&accounts, disabled)
+}
+
+pub fn targets_for_accounts(
+    accounts: &[AccountContext],
+    disabled: &[String],
+) -> Vec<RefreshTarget> {
+    accounts
+        .iter()
+        .filter(|account| {
+            account.enabled
+                && !disabled
+                    .iter()
+                    .any(|id| id == &account.card_id || id == &account.provider_id)
+        })
+        .filter_map(|account| {
+            let runtime = providers::runtime_for(&account.provider_id)?;
+            let stamp = runtime.probe(account).ok()?.credential_stamp;
             let runtime_account = account.clone();
-            Some(RefreshTarget::new(account, stamp, move || {
+            Some(RefreshTarget::new(account.clone(), stamp, move || {
                 let runtime = runtime.clone();
                 let account = runtime_account.clone();
                 Box::pin(async move { runtime.refresh(&account).await })
