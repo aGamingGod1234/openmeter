@@ -74,7 +74,7 @@ pub fn descriptors_for(provider_id: &str) -> &'static [LimitResourceDescriptor] 
 }
 
 fn usage_snapshot(snapshot: &ProviderSnapshot) -> Value {
-    let lines = snapshot
+    let lines: Vec<Value> = snapshot
         .metrics
         .iter()
         .map(|metric| {
