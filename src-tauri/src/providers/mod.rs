@@ -19,7 +19,236 @@ pub mod openrouter;
 pub mod zai;
 
 use serde::{Deserialize, Serialize};
+use std::future::Future;
 use std::path::PathBuf;
+use std::pin::Pin;
+use std::sync::Arc;
+
+use crate::accounts::AccountContext;
+
+pub type ProviderFetchFuture = Pin<Box<dyn Future<Output = ProviderSnapshot> + Send + 'static>>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProviderDescriptor {
+    pub id: &'static str,
+    pub display_name: &'static str,
+}
+
+pub fn provider_catalog() -> &'static [ProviderDescriptor] {
+    &[
+        ProviderDescriptor {
+            id: "claude",
+            display_name: "Claude",
+        },
+        ProviderDescriptor {
+            id: "codex",
+            display_name: "Codex",
+        },
+        ProviderDescriptor {
+            id: "cursor",
+            display_name: "Cursor",
+        },
+        ProviderDescriptor {
+            id: "antigravity",
+            display_name: "Antigravity",
+        },
+        ProviderDescriptor {
+            id: "copilot",
+            display_name: "Copilot",
+        },
+        ProviderDescriptor {
+            id: "devin",
+            display_name: "Devin",
+        },
+        ProviderDescriptor {
+            id: "grok",
+            display_name: "Grok",
+        },
+        ProviderDescriptor {
+            id: "opencode",
+            display_name: "OpenCode",
+        },
+        ProviderDescriptor {
+            id: "openrouter",
+            display_name: "OpenRouter",
+        },
+        ProviderDescriptor {
+            id: "zai",
+            display_name: "Z.ai",
+        },
+        ProviderDescriptor {
+            id: "minimax",
+            display_name: "MiniMax",
+        },
+        ProviderDescriptor {
+            id: "deepseek",
+            display_name: "DeepSeek",
+        },
+        ProviderDescriptor {
+            id: "moonshot",
+            display_name: "Moonshot",
+        },
+        ProviderDescriptor {
+            id: "elevenlabs",
+            display_name: "ElevenLabs",
+        },
+        ProviderDescriptor {
+            id: "ollama",
+            display_name: "Ollama",
+        },
+        ProviderDescriptor {
+            id: "codebuff",
+            display_name: "Codebuff",
+        },
+        ProviderDescriptor {
+            id: "kilo",
+            display_name: "Kilo",
+        },
+        ProviderDescriptor {
+            id: "aihubmix",
+            display_name: "AihubMix",
+        },
+    ]
+}
+
+#[derive(Clone)]
+pub struct CredentialMaterial {
+    source_id: String,
+    secret: Vec<u8>,
+}
+
+impl CredentialMaterial {
+    pub fn new(source_id: impl Into<String>, secret: Vec<u8>) -> Self {
+        Self {
+            source_id: source_id.into(),
+            secret,
+        }
+    }
+
+    pub fn source_id(&self) -> &str {
+        &self.source_id
+    }
+
+    pub fn expose(&self) -> &[u8] {
+        &self.secret
+    }
+}
+
+impl std::fmt::Debug for CredentialMaterial {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("CredentialMaterial")
+            .field("source_id", &self.source_id)
+            .field("secret", &"[secret]")
+            .finish()
+    }
+}
+
+impl Drop for CredentialMaterial {
+    fn drop(&mut self) {
+        self.secret.fill(0);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CredentialProbe {
+    pub source_id: String,
+    pub credential_stamp: String,
+}
+
+type CredentialResolver =
+    Arc<dyn Fn(&AccountContext) -> Result<CredentialMaterial, String> + Send + Sync>;
+type RuntimeRefresher =
+    Arc<dyn Fn(&AccountContext, &CredentialMaterial) -> ProviderFetchFuture + Send + Sync>;
+
+#[derive(Clone)]
+pub struct ProviderRuntime {
+    id: &'static str,
+    resolver: CredentialResolver,
+    refresher: RuntimeRefresher,
+}
+
+impl ProviderRuntime {
+    pub fn new<Resolve, Refresh, RefreshFuture>(
+        id: &'static str,
+        resolver: Resolve,
+        refresher: Refresh,
+    ) -> Self
+    where
+        Resolve: Fn(&AccountContext) -> Result<CredentialMaterial, String> + Send + Sync + 'static,
+        Refresh: Fn(&AccountContext, &CredentialMaterial) -> RefreshFuture + Send + Sync + 'static,
+        RefreshFuture: Future<Output = ProviderSnapshot> + Send + 'static,
+    {
+        Self {
+            id,
+            resolver: Arc::new(resolver),
+            refresher: Arc::new(move |account, credential| {
+                Box::pin(refresher(account, credential))
+            }),
+        }
+    }
+
+    pub fn probe(&self, account: &AccountContext) -> Result<CredentialProbe, String> {
+        self.validate_account(account)?;
+        let credential =
+            (self.resolver)(account).map_err(|error| crate::redaction::redact_text(&error))?;
+        Ok(CredentialProbe {
+            source_id: credential.source_id().to_string(),
+            credential_stamp: crate::redaction::credential_stamp(credential.expose()),
+        })
+    }
+
+    pub async fn refresh(&self, account: &AccountContext) -> ProviderSnapshot {
+        if let Err(error) = self.validate_account(account) {
+            return self.error_snapshot(account, &error, "invalid-account");
+        }
+        let credential = match (self.resolver)(account) {
+            Ok(credential) => credential,
+            Err(error) => return self.error_snapshot(account, &error, "no-credential"),
+        };
+        let stamp = crate::redaction::credential_stamp(credential.expose());
+        let raw = (self.refresher)(account, &credential).await;
+        let fetched_at = chrono::Utc::now().timestamp_millis();
+        let lifetime = (raw.expires_at - raw.fetched_at).clamp(0, 5 * 60 * 1_000);
+        let mut snapshot =
+            raw.with_cache_identity(account, &stamp, fetched_at, fetched_at + lifetime);
+        crate::redaction::redact_snapshot(&mut snapshot);
+        snapshot
+    }
+
+    fn validate_account(&self, account: &AccountContext) -> Result<(), String> {
+        if account.provider_id == self.id {
+            Ok(())
+        } else {
+            Err(format!(
+                "runtime '{}' cannot refresh provider '{}'",
+                self.id, account.provider_id
+            ))
+        }
+    }
+
+    fn error_snapshot(
+        &self,
+        account: &AccountContext,
+        error: &str,
+        stamp_seed: &str,
+    ) -> ProviderSnapshot {
+        let now = chrono::Utc::now().timestamp_millis();
+        let mut snapshot = ProviderSnapshot::error(
+            &account.card_id,
+            &account.display_name,
+            crate::redaction::redact_text(error),
+        )
+        .with_cache_identity(
+            account,
+            &crate::redaction::credential_stamp(stamp_seed.as_bytes()),
+            now,
+            now,
+        );
+        crate::redaction::redact_snapshot(&mut snapshot);
+        snapshot
+    }
+}
 
 /// One row inside a provider card, e.g. "Session ▓▓▓░░ 43% left · Resets in 2h".
 /// `resets_at` (epoch ms) + `period_ms` are the structured facts the pace
@@ -193,11 +422,17 @@ fn proxy_url() -> Option<&'static str> {
                 .ok()
                 .and_then(|raw| serde_json::from_str(raw.trim_start_matches('\u{feff}')).ok())?;
             let proxy = cfg.get("proxy")?;
-            if !proxy.get("enabled").and_then(serde_json::Value::as_bool).unwrap_or(false) {
+            if !proxy
+                .get("enabled")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false)
+            {
                 return None;
             }
             let url = proxy.get("url")?.as_str()?.trim().to_string();
-            let valid = ["http://", "https://", "socks5://"].iter().any(|s| url.starts_with(s));
+            let valid = ["http://", "https://", "socks5://"]
+                .iter()
+                .any(|s| url.starts_with(s));
             if url.is_empty() || !valid {
                 return None;
             }
@@ -239,8 +474,9 @@ pub fn read_windows_credential(target: &str) -> Option<Vec<u8>> {
             return None;
         }
         let cred = &*pcred;
-        let blob = std::slice::from_raw_parts(cred.CredentialBlob, cred.CredentialBlobSize as usize)
-            .to_vec();
+        let blob =
+            std::slice::from_raw_parts(cred.CredentialBlob, cred.CredentialBlobSize as usize)
+                .to_vec();
         CredFree(pcred as *mut std::ffi::c_void);
         Some(blob)
     }
@@ -252,8 +488,10 @@ pub fn credential_string(target: &str) -> Option<String> {
     let blob = read_windows_credential(target)?;
     let text = String::from_utf8(blob.clone()).ok().or_else(|| {
         if blob.len() % 2 == 0 {
-            let utf16: Vec<u16> =
-                blob.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+            let utf16: Vec<u16> = blob
+                .chunks_exact(2)
+                .map(|c| u16::from_le_bytes([c[0], c[1]]))
+                .collect();
             String::from_utf16(&utf16).ok()
         } else {
             None
@@ -262,7 +500,9 @@ pub fn credential_string(target: &str) -> Option<String> {
     let text = text.trim().trim_matches('\0').to_string();
     if let Some(b64) = text.strip_prefix("go-keyring-base64:") {
         use base64::Engine;
-        let decoded = base64::engine::general_purpose::STANDARD.decode(b64.trim()).ok()?;
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(b64.trim())
+            .ok()?;
         return String::from_utf8(decoded).ok();
     }
     Some(text)
@@ -289,7 +529,10 @@ pub fn credit_meter(provider: &str, sign: &str, balance: f64) -> Option<Metric> 
         .and_then(|raw| serde_json::from_str(&raw).ok())
         .filter(serde_json::Value::is_object)
         .unwrap_or_else(|| serde_json::json!({}));
-    let high = doc.get(provider).and_then(serde_json::Value::as_f64).unwrap_or(0.0);
+    let high = doc
+        .get(provider)
+        .and_then(serde_json::Value::as_f64)
+        .unwrap_or(0.0);
     if balance > high {
         doc[provider] = serde_json::Value::from(balance);
         let _ = std::fs::write(
@@ -332,4 +575,3 @@ pub fn stored_api_key(provider: &str, env_vars: &[&str]) -> Option<String> {
     }
     None
 }
-
