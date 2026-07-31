@@ -3,7 +3,7 @@ use openmeter_lib::refresh::{CliAction, CliOptions};
 #[test]
 fn parses_default_force_family_and_exact_account_invocations() {
     assert_eq!(
-        CliOptions::parse([]).unwrap(),
+        CliOptions::parse(std::iter::empty::<&str>()).unwrap(),
         CliAction::Run(CliOptions::default())
     );
     assert_eq!(
