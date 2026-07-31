@@ -139,8 +139,9 @@ impl RefreshCoordinator {
             } else {
                 now + FRESH_MS
             };
-            let snapshot =
+            let mut snapshot =
                 raw.with_cache_identity(&target.account, &target.credential_stamp, now, expires_at);
+            crate::redaction::redact_snapshot(&mut snapshot);
             if snapshot.status == "ok" {
                 if let Ok(mut cache) = self.cache.lock() {
                     cache.insert(snapshot.clone());

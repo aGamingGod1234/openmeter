@@ -61,7 +61,7 @@ fn assignment_regex() -> &'static Regex {
     static REGEX: OnceLock<Regex> = OnceLock::new();
     REGEX.get_or_init(|| {
         Regex::new(
-            r#"(?i)\b((?:access[_-]?token|refresh[_-]?token|token|api[_-]?key|authorization)\s*[:=]\s*["']?)[A-Za-z0-9._~+/-]{8,}=*["']?"#,
+            r#"(?i)\b((?:access[_-]?token|refresh[_-]?token|token|api[_-]?key|authorization)(?:\s*[:=]\s*|\s+)["']?)[A-Za-z0-9._~+/-]{8,}=*["']?"#,
         )
         .expect("valid credential assignment regex")
     })
