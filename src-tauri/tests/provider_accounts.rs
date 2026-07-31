@@ -1,8 +1,9 @@
 use std::sync::{Arc, Mutex};
 
-use openmeter_lib::accounts::AccountContext;
+use openmeter_lib::accounts::{AccountContext, AccountSource};
 use openmeter_lib::providers::{
-    provider_catalog, CredentialMaterial, Metric, ProviderRuntime, ProviderSnapshot,
+    account_credential_stamp, provider_catalog, CredentialMaterial, Metric, ProviderRuntime,
+    ProviderSnapshot,
 };
 
 #[test]
@@ -38,6 +39,25 @@ fn provider_catalog_covers_openusage_parity_and_existing_pane_providers() {
     ] {
         assert!(ids.contains(&pane_provider));
     }
+}
+
+#[test]
+fn directory_accounts_stamp_their_own_credential_bytes() {
+    let root =
+        std::env::temp_dir().join(format!("openmeter-provider-account-{}", std::process::id()));
+    let credential_dir = root.join(".codex");
+    std::fs::create_dir_all(&credential_dir).unwrap();
+    let credential_file = credential_dir.join("auth.json");
+    std::fs::write(&credential_file, br#"{"token":"first"}"#).unwrap();
+
+    let mut account = AccountContext::named("codex", "work", "Work").unwrap();
+    account.source = AccountSource::Directory { path: root.clone() };
+    let first = account_credential_stamp(&account);
+    std::fs::write(&credential_file, br#"{"token":"second"}"#).unwrap();
+    let second = account_credential_stamp(&account);
+    assert_ne!(first, second);
+
+    let _ = std::fs::remove_dir_all(root);
 }
 
 #[test]

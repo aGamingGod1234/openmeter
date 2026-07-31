@@ -299,7 +299,8 @@ pub fn default_targets(disabled: &[String]) -> Vec<RefreshTarget> {
     macro_rules! target {
         ($id:literal, $snapshot:path) => {{
             let account = AccountContext::default_for($id).expect("static provider id");
-            RefreshTarget::new(account, "default", || Box::pin($snapshot()))
+            let stamp = providers::account_credential_stamp(&account);
+            RefreshTarget::new(account, stamp, || Box::pin($snapshot()))
         }};
     }
     let targets = vec![

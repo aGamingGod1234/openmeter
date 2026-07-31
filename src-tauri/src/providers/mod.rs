@@ -24,7 +24,7 @@ use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use crate::accounts::AccountContext;
+use crate::accounts::{AccountContext, AccountSource};
 
 pub type ProviderFetchFuture = Pin<Box<dyn Future<Output = ProviderSnapshot> + Send + 'static>>;
 
@@ -247,6 +247,108 @@ impl ProviderRuntime {
         );
         crate::redaction::redact_snapshot(&mut snapshot);
         snapshot
+    }
+}
+
+/// Computes a one-way cache identity from the account's actual local
+/// credential source. The bytes never leave this function.
+pub fn account_credential_stamp(account: &AccountContext) -> String {
+    let mut material = Vec::new();
+    material.extend_from_slice(account.card_id.as_bytes());
+    for path in credential_paths(account) {
+        if let Ok(bytes) = std::fs::read(&path) {
+            material.extend_from_slice(path.to_string_lossy().as_bytes());
+            material.extend_from_slice(&bytes);
+        }
+    }
+    for variable in credential_environment_variables(&account.provider_id) {
+        if let Ok(value) = std::env::var(variable) {
+            material.extend_from_slice(variable.as_bytes());
+            material.extend_from_slice(value.as_bytes());
+        }
+    }
+    for target in credential_manager_targets(&account.provider_id) {
+        if let Some(bytes) = read_windows_credential(target) {
+            material.extend_from_slice(target.as_bytes());
+            material.extend_from_slice(&bytes);
+        }
+    }
+    if material.len() == account.card_id.len() {
+        material.extend_from_slice(b":no-local-credential");
+    }
+    crate::redaction::credential_stamp(&material)
+}
+
+fn credential_paths(account: &AccountContext) -> Vec<PathBuf> {
+    let relative: &[&str] = match account.provider_id.as_str() {
+        "claude" => &[".claude/.credentials.json", ".credentials.json"],
+        "codex" => &[".codex/auth.json", "auth.json"],
+        "cursor" => &["Cursor/User/globalStorage/state.vscdb", "state.vscdb"],
+        "copilot" => &[
+            ".config/github-copilot/apps.json",
+            ".config/github-copilot/hosts.json",
+            "GitHub CLI/hosts.yml",
+        ],
+        "devin" => &[
+            "devin/credentials.toml",
+            ".local/share/devin/credentials.toml",
+            "credentials.toml",
+        ],
+        "grok" => &[".grok/auth.json", "auth.json"],
+        "opencode" => &[
+            ".local/share/opencode/opencode.db",
+            "opencode.db",
+            ".local/share/opencode/auth.json",
+        ],
+        "openrouter" => &[".config/opencode/auth.json"],
+        "zai" => &[".config/zai/key.json", "key.json"],
+        "minimax" => &[".minimax/config.yaml"],
+        "codebuff" => &[".config/manicode/credentials.json"],
+        "kilo" => &[".local/share/kilo/auth.json"],
+        _ => &[],
+    };
+    match &account.source {
+        AccountSource::Directory { path } => relative.iter().map(|item| path.join(item)).collect(),
+        AccountSource::Manual => vec![
+            config_dir().join(format!("{}.json", account.card_id)),
+            config_dir().join(format!("{}.json", account.provider_id)),
+        ],
+        AccountSource::DefaultHome => {
+            let home = dirs::home_dir().unwrap_or_default();
+            let appdata = std::env::var("APPDATA")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| home.clone());
+            relative
+                .iter()
+                .flat_map(|item| [home.join(item), appdata.join(item)])
+                .chain(std::iter::once(
+                    config_dir().join(format!("{}.json", account.provider_id)),
+                ))
+                .collect()
+        }
+    }
+}
+
+fn credential_environment_variables(provider_id: &str) -> &'static [&'static str] {
+    match provider_id {
+        "openrouter" => &["OPENROUTER_API_KEY"],
+        "zai" => &["ZAI_API_KEY", "GLM_API_KEY"],
+        "minimax" => &["MINIMAX_API_KEY"],
+        "deepseek" => &["DEEPSEEK_API_KEY"],
+        "moonshot" => &["MOONSHOT_API_KEY", "KIMI_API_KEY"],
+        "elevenlabs" => &["ELEVENLABS_API_KEY"],
+        "codebuff" => &["CODEBUFF_API_KEY"],
+        "kilo" => &["KILO_API_KEY"],
+        "aihubmix" => &["AIHUBMIX_API_KEY"],
+        _ => &[],
+    }
+}
+
+fn credential_manager_targets(provider_id: &str) -> &'static [&'static str] {
+    match provider_id {
+        "antigravity" => &["gemini:antigravity"],
+        "copilot" => &["gh:github.com", "gh:github.com:"],
+        _ => &[],
     }
 }
 
