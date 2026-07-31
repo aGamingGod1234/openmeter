@@ -2,7 +2,7 @@ mod alerts;
 pub mod accounts;
 pub mod cache;
 pub mod contracts;
-mod httpapi;
+pub mod httpapi;
 pub mod platform;
 mod pricing;
 pub mod providers;
