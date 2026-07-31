@@ -540,6 +540,14 @@ async fn fetch_usage(app: tauri::AppHandle) -> Vec<providers::Snapshot> {
         .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
         .unwrap_or_default();
 
+    let all = refresh::refresh_default(false, None, &disabled).await;
+    let enabled_ids: Vec<String> = all
+        .iter()
+        .map(|snapshot| snapshot.provider_id.clone())
+        .collect();
+
+    /* The pre-coordinator implementation is kept inert in this patch while
+    its UI-only post-refresh effects are separated below.
     // Each provider future is boxed onto the heap and spawned as its own
     // task. A single tokio::join! over 28 inlined futures builds one huge
     // combined state machine on the calling thread's stack — at 28 providers
@@ -660,6 +668,7 @@ async fn fetch_usage(app: tauri::AppHandle) -> Vec<providers::Snapshot> {
         }
     }
 
+    */
     httpapi::publish(&all);
     update_tray(&app, &all, &cfg);
 
