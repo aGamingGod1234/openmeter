@@ -1,0 +1,33 @@
+{
+  "schema": "openusage.limits.v1",
+  "generatedAt": "2026-07-13T01:40:00.000Z",
+  "providers": {
+    "codex": {
+      "providerId": "codex",
+      "accountId": "default",
+      "displayName": "Codex",
+      "plan": "Pro 20x",
+      "fetchedAt": "2026-07-13T01:39:30.000Z",
+      "expiresAt": "2026-07-13T01:44:30.000Z",
+      "stale": false,
+      "resources": {
+        "weekly": {
+          "kind": "consumption",
+          "unit": "percent",
+          "used": 42.0,
+          "limit": 100.0,
+          "remaining": 58.0,
+          "utilization": 0.42,
+          "resetsAt": "2026-07-13T06:00:00.000Z",
+          "windowSeconds": 604800.0
+        }
+      }
+    }
+  },
+  "errors": [
+    {
+      "providerId": "codex--work",
+      "message": "work account unavailable"
+    }
+  ]
+}
