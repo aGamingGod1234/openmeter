@@ -58,6 +58,10 @@ Downloads the latest release, verifies its SHA-256, installs per-user
 
 Silent install (for scripts): `OpenMeter_x.y.z_x64-setup.exe /S`
 
+The installer also places the `openmeter` command on your user `PATH`.
+Open a new terminal and run `openmeter --help`, or run `openmeter --force
+claude` to refresh one provider and print the OpenUsage-compatible limits JSON.
+
 OpenMeter keeps itself current after that — every install checks for
 signed updates and offers a one-click restart when a new version ships.
 

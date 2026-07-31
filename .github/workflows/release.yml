@@ -14,12 +14,15 @@ jobs:
     runs-on: windows-latest
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 24
+          cache: npm
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -30,8 +33,21 @@ jobs:
       - name: Install frontend deps
         run: npm ci
 
+      - name: Verify frontend
+        run: |
+          npm test -- --run
+          npm run build
+
+      - name: Verify Rust
+        run: |
+          cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+          cargo test --manifest-path src-tauri/Cargo.toml --all-targets
+
+      - name: Build bundled CLI
+        run: cargo build --manifest-path src-tauri/Cargo.toml --release --bin openmeter
+
       - name: Build (signed)
-        run: npm run tauri build
+        run: npm run tauri build -- --bundles nsis
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -63,17 +79,27 @@ jobs:
             } }
           } | ConvertTo-Json -Depth 4
           [System.IO.File]::WriteAllText("latest.json", $manifest, (New-Object System.Text.UTF8Encoding($false)))
+          $checksum = "$hash  $($exe.Name)"
+          [System.IO.File]::WriteAllText("SHA256SUMS.txt", "$checksum`n", (New-Object System.Text.UTF8Encoding($false)))
           Get-Content latest.json
+          Get-Content SHA256SUMS.txt
+
+      - name: Attest installer provenance
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: src-tauri/target/release/bundle/nsis/*-setup.exe
 
       - name: Upload artifacts (dry run only)
         if: github.event_name == 'workflow_dispatch'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: openmeter-installer
           path: |
             src-tauri/target/release/bundle/nsis/*-setup.exe
             src-tauri/target/release/bundle/nsis/*-setup.exe.sig
             latest.json
+            SHA256SUMS.txt
 
       - name: Create GitHub release
         if: startsWith(github.ref, 'refs/tags/')
@@ -83,6 +109,6 @@ jobs:
           gh release create $env:GITHUB_REF_NAME `
             --title "OpenMeter $($env:GITHUB_REF_NAME.TrimStart('v'))" `
             --generate-notes `
-            $exe.FullName "$($exe.FullName).sig" latest.json
+            $exe.FullName "$($exe.FullName).sig" latest.json SHA256SUMS.txt
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

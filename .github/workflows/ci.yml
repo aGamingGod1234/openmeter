@@ -9,21 +9,35 @@ jobs:
   rust:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+      - name: Check maintained Rust formatting
+        shell: pwsh
+        run: |
+          rustfmt --edition 2021 --check --config skip_children=true `
+            src-tauri/src/accounts.rs `
+            src-tauri/src/cache.rs `
+            src-tauri/src/contracts.rs `
+            src-tauri/src/httpapi.rs `
+            src-tauri/src/platform.rs `
+            src-tauri/src/redaction.rs `
+            src-tauri/src/refresh.rs `
+            src-tauri/src/bin/openmeter.rs
+      - name: Run Clippy
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
       - name: Run Rust tests
         run: cargo test --manifest-path src-tauri/Cargo.toml --all-targets
 
   frontend:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
       - run: npm ci
       - run: npm test -- --run

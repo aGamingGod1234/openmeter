@@ -1,6 +1,6 @@
 [package]
 name = "openmeter"
-version = "0.4.28"
+version = "0.5.0"
 description = "AI subscription usage in the Windows tray"
 authors = ["OpenMeter contributors"]
 edition = "2021"

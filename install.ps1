@@ -48,14 +48,14 @@ if ($actual -ne $expected.ToLower()) {
 Write-Host '> SHA-256 verified.'
 
 Write-Host '> Installing (per-user, no admin needed)...'
-Get-Process -Name openmeter -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+Get-Process -Name openmeter-tray, openmeter -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 Start-Sleep -Milliseconds 500
 $proc = Start-Process -FilePath $dest -ArgumentList '/S' -Wait -PassThru
 Remove-Item $dest -Force -ErrorAction SilentlyContinue
 if ($proc.ExitCode -ne 0) { throw "Installer exited with code $($proc.ExitCode)" }
 
-$exe = Join-Path $env:LOCALAPPDATA 'OpenMeter\openmeter.exe'
-if (-not (Test-Path $exe)) { throw 'Install finished but openmeter.exe was not found - please report this at https://github.com/aGamingGod1234/openmeter/issues' }
+$exe = Join-Path $env:LOCALAPPDATA 'OpenMeter\openmeter-tray.exe'
+if (-not (Test-Path $exe)) { throw 'Install finished but openmeter-tray.exe was not found - please report this at https://github.com/aGamingGod1234/openmeter/issues' }
 
 Start-Process $exe
 Write-Host ''

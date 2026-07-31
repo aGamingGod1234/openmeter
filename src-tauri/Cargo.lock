@@ -2695,7 +2695,7 @@ dependencies = [
 
 [[package]]
 name = "openmeter"
-version = "0.4.28"
+version = "0.5.0"
 dependencies = [
  "arboard",
  "base64 0.22.1",
