@@ -66,7 +66,7 @@ async fn load_access() -> Result<Access, String> {
 }
 
 async fn load_access_from(path: &std::path::Path) -> Result<Access, String> {
-    let raw = std::fs::read_to_string(&path).map_err(|e| format!("read auth.json: {e}"))?;
+    let raw = std::fs::read_to_string(path).map_err(|e| format!("read auth.json: {e}"))?;
     let mut doc: Value = serde_json::from_str(&raw).map_err(|e| format!("parse auth.json: {e}"))?;
     let tokens = doc
         .get("tokens")
@@ -155,10 +155,10 @@ async fn load_access_from(path: &std::path::Path) -> Result<Access, String> {
             doc["last_refresh"] = Value::from(Utc::now().to_rfc3339());
             // Keep a copy of the CLI's own file before touching it, so a bad
             // write can never cost the user their login.
-            let _ = std::fs::copy(&path, path.with_extension("json.openmeter-bak"));
+            let _ = std::fs::copy(path, path.with_extension("json.openmeter-bak"));
             let tmp = path.with_extension("json.tmp");
             std::fs::write(&tmp, serde_json::to_string_pretty(&doc).unwrap_or(raw))
-                .and_then(|_| std::fs::rename(&tmp, &path))
+                .and_then(|_| std::fs::rename(&tmp, path))
                 .map_err(|e| format!("write refreshed auth.json: {e}"))?;
         }
     }

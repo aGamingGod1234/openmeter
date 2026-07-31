@@ -131,6 +131,7 @@ async fn fetch() -> Result<Snapshot, String> {
     Ok(Snapshot::ok(ID, NAME, plan, metrics))
 }
 
+#[allow(clippy::items_after_test_module)]
 #[cfg(test)]
 mod tests {
     /// Live probe with this machine's real GitHub login — run manually via

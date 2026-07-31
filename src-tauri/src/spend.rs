@@ -1419,6 +1419,7 @@ fn parse_csv_date(s: &str) -> Option<DateTime<Utc>> {
     None
 }
 
+#[allow(clippy::items_after_test_module)]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1645,7 +1646,7 @@ mod tests {
                         {"type": "message", "input_tokens": 1.0, "output_tokens": 291.0}
                     ]}}})
         .to_string();
-        let once = claude_run(&[line.clone()]);
+        let once = claude_run(std::slice::from_ref(&line));
         let models: HashSet<&str> = once.days.keys().map(|(_, m)| m.as_str()).collect();
         assert!(models.iter().any(|m| m.contains("fable")));
         assert!(models.iter().any(|m| m.contains("haiku")));

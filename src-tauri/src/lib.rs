@@ -515,11 +515,13 @@ fn update_tray_strip(app: tauri::AppHandle, entries: Vec<StripEntry>) -> Result<
 /// A provider that just failed gets benched briefly instead of being
 /// re-probed on every refresh: 60s for ordinary errors, 5 minutes for rate
 /// limits (hammering a 429 makes it worse — learned that the hard way).
+#[allow(dead_code)]
 struct FailState {
     until_ms: i64,
     note: String,
 }
 
+#[allow(dead_code)]
 fn fail_state() -> &'static std::sync::Mutex<std::collections::HashMap<String, FailState>> {
     static STATE: std::sync::OnceLock<
         std::sync::Mutex<std::collections::HashMap<String, FailState>>,
@@ -527,6 +529,7 @@ fn fail_state() -> &'static std::sync::Mutex<std::collections::HashMap<String, F
     STATE.get_or_init(Default::default)
 }
 
+#[allow(dead_code)]
 async fn guarded<F>(id: &str, name: &str, fut: F) -> providers::Snapshot
 where
     F: std::future::Future<Output = providers::Snapshot>,
