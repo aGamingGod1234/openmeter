@@ -75,7 +75,9 @@ git clone https://github.com/aGamingGod1234/openmeter
 cd openmeter
 npm install
 npm run tauri dev     # run with hot reload
-npm run tauri build   # installer lands in src-tauri/target/release/bundle
+cargo build --manifest-path src-tauri/Cargo.toml --release --bin openmeter
+npm run tauri build -- --bundles nsis --config src-tauri/tauri.bundle.conf.json
+                       # installer lands in src-tauri/target/release/bundle
 ```
 
 ## How it works
