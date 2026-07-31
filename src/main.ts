@@ -1,6 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
+import type { Metric, Snapshot } from "./models";
+import { snapshotProviderId } from "./models";
+import type { Layout, ProviderLayout } from "./layout";
+import { migrateLayout, snapshotCardId } from "./layout";
 
 // Injected by vite.config.ts at build time, e.g. "0707.1432".
 declare const __BUILD_STAMP__: string;
@@ -46,27 +50,6 @@ const PROVIDER_ICONS: Record<string, string> = {
 // Types
 // ---------------------------------------------------------------------------
 
-interface Metric {
-  label: string;
-  kind: string;
-  used_percent: number | null;
-  detail: string | null;
-  value: string | null;
-  resets_at: number | null;
-  period_ms: number | null;
-}
-
-interface Snapshot {
-  id: string;
-  name: string;
-  plan: string | null;
-  status: string;
-  error: string | null;
-  metrics: Metric[];
-  stale: boolean;
-  warning: string | null;
-}
-
 interface ModelSpend {
   model: string;
   cost: number;
@@ -111,7 +94,8 @@ function staleHelp(s: Snapshot): string {
   const w = (s.warning ?? "The last refresh failed").replace(/[.\s]+$/, "");
   const lw = w.toLowerCase();
   const relogin =
-    RELOGIN[s.id] ?? "add the API key again in Settings (or sign in with the tool once)";
+    RELOGIN[snapshotProviderId(s)] ??
+    "add the API key again in Settings (or sign in with the tool once)";
   let fix = "OpenMeter keeps retrying automatically — nothing to do unless this persists.";
   if (/run `|open the/.test(lw)) {
     // The provider's own message already says what to do.
@@ -144,19 +128,6 @@ type SpendTab = "today" | "yesterday" | "last30";
 
 // Per-provider layout: which rows show, their order, which are tucked
 // behind the caret ("On Demand"), and which are starred for the tray strip.
-interface ProviderLayout {
-  metricOrder: string[];
-  onDemand: string[];
-  hidden: string[];
-  starred: string[];
-  expanded: boolean;
-}
-
-interface Layout {
-  providerOrder: string[];
-  providers: Record<string, ProviderLayout>;
-}
-
 interface Config {
   refreshMinutes: number;
   disabled: string[];
@@ -441,27 +412,30 @@ function ensureLayout(): void {
   let layout = config.layout;
 
   if (!layout) {
-    const orderedIds = [...lastSnapshots].sort((a, b) => rankSnapshot(a) - rankSnapshot(b)).map((s) => s.id);
+    const orderedIds = [...lastSnapshots]
+      .sort((a, b) => rankSnapshot(a) - rankSnapshot(b))
+      .map(snapshotCardId);
     for (const [id] of ALL_PROVIDERS) if (!orderedIds.includes(id)) orderedIds.push(id);
     layout = { providerOrder: orderedIds, providers: {} };
     changed = true;
   }
 
+  const migrated = migrateLayout(layout, lastSnapshots, (snapshot) => {
+    const providerId = snapshotProviderId(snapshot);
+    const spend = lastSpend.find((entry) => entry.id === providerId);
+    return defaultProviderLayout(
+      snapshot,
+      spend,
+      config.trayProviders.includes(snapshotCardId(snapshot)),
+    );
+  });
+  if (JSON.stringify(migrated) !== JSON.stringify(layout)) changed = true;
+  layout = migrated;
+
   for (const s of lastSnapshots) {
-    if (!layout.providerOrder.includes(s.id)) {
-      layout.providerOrder.push(s.id);
-      changed = true;
-    }
-    const spend = lastSpend.find((sp) => sp.id === s.id);
-    let L = layout.providers[s.id];
-    if (!L) {
-      // One-time migration: providers picked in the old tray-strip setting
-      // become starred so the strip carries over.
-      L = defaultProviderLayout(s, spend, config.trayProviders.includes(s.id));
-      layout.providers[s.id] = L;
-      changed = true;
-      continue;
-    }
+    const cardId = snapshotCardId(s);
+    const spend = lastSpend.find((sp) => sp.id === snapshotProviderId(s));
+    const L = layout.providers[cardId];
     // New metrics ship once; spend rows appear when spend data first exists.
     for (const m of s.metrics) {
       if (!L.metricOrder.includes(m.label)) {
@@ -747,21 +721,25 @@ function renderItem(s: Snapshot, spend: ProviderSpend | undefined, key: string):
   if (key === TREND_KEY) return spend ? renderTrend(spend) : "";
   const spendKey = SPEND_KEYS.find(([label]) => label === key);
   if (spendKey)
-    return spend ? renderSpendRow(s.id, spendKey[0], spendKey[1], spend[spendKey[1]], spend) : "";
+    return spend
+      ? renderSpendRow(snapshotProviderId(s), spendKey[0], spendKey[1], spend[spendKey[1]], spend)
+      : "";
   const metric = s.metrics.find((m) => m.label === key);
   return metric ? renderMetric(metric) : "";
 }
 
 function renderCard(s: Snapshot): string {
+  const cardId = snapshotCardId(s);
+  const providerId = snapshotProviderId(s);
   const plan = s.plan ? `<span class="plan">${escapeHtml(s.plan)}</span>` : "";
-  const icon = PROVIDER_ICONS[s.id] ?? "";
+  const icon = PROVIDER_ICONS[providerId] ?? "";
   const muted = s.status === "ok" ? "" : " muted";
 
   let body: string;
   let caret = "";
   if (s.status === "ok") {
-    const L = providerLayout(s.id);
-    const spend = lastSpend.find((sp) => sp.id === s.id);
+    const L = providerLayout(cardId);
+    const spend = lastSpend.find((sp) => sp.id === providerId);
     const visible = L.metricOrder.filter((k) => !L.hidden.includes(k));
     const always = visible.filter((k) => !L.onDemand.includes(k));
     const onDemand = visible.filter((k) => L.onDemand.includes(k));
@@ -769,9 +747,9 @@ function renderCard(s: Snapshot): string {
     body = always.map((k) => renderItem(s, spend, k)).join("");
     const onDemandHtml = onDemand.map((k) => renderItem(s, spend, k)).join("");
     if (onDemandHtml.trim()) {
-      const anim = L.expanded && animateExpandId === s.id ? " anim" : "";
+      const anim = L.expanded && animateExpandId === cardId ? " anim" : "";
       caret = `
-        <button class="card-caret" data-caret="${s.id}" title="${L.expanded ? "Show less" : "Show more"}">${L.expanded ? "⌃" : "⌄"}</button>
+        <button class="card-caret" data-caret="${cardId}" title="${L.expanded ? "Show less" : "Show more"}">${L.expanded ? "⌃" : "⌄"}</button>
         ${L.expanded ? `<div class="on-demand${anim}">${onDemandHtml}</div>` : ""}`;
     }
   } else {
@@ -781,16 +759,16 @@ function renderCard(s: Snapshot): string {
   const stale = s.stale
     ? `<span class="stale" title="${escapeHtml(staleHelp(s))}">⚠ Outdated</span>`
     : "";
-  const links = (PROVIDER_LINKS[s.id] ?? [])
+  const links = (PROVIDER_LINKS[providerId] ?? [])
     .map((l) => `<button class="quick-link" data-link="${escapeHtml(l.url)}">${escapeHtml(l.label)}</button>`)
     .join("<span class='quick-sep'>·</span>");
   const linksRow = links ? `<div class="quick-links">${links}</div>` : "";
   const share =
     s.status === "ok"
-      ? `<button class="share-btn" data-share="${s.id}" title="Copy card as image">⧉</button>`
+      ? `<button class="share-btn" data-share="${cardId}" title="Copy card as image">⧉</button>`
       : "";
   return `
-    <article class="provider${muted}" data-provider="${s.id}">
+    <article class="provider${muted}" data-provider="${cardId}" data-provider-family="${providerId}">
       <div class="provider-head">
         <span class="drag-grip" title="Drag to reorder">⠿</span>
         <span class="provider-name">${escapeHtml(s.name)}</span>
@@ -811,9 +789,9 @@ function renderCard(s: Snapshot): string {
 function orderedSnapshots(): Snapshot[] {
   const order = config.layout?.providerOrder ?? [];
   // Disabled providers disappear immediately — not on the next fetch.
-  return lastSnapshots.filter((s) => !config.disabled.includes(s.id)).sort((a, b) => {
-    const ia = order.indexOf(a.id);
-    const ib = order.indexOf(b.id);
+  return lastSnapshots.filter((s) => !config.disabled.includes(snapshotCardId(s))).sort((a, b) => {
+    const ia = order.indexOf(snapshotCardId(a));
+    const ib = order.indexOf(snapshotCardId(b));
     if (ia !== -1 && ib !== -1) return ia - ib;
     return rankSnapshot(a) - rankSnapshot(b);
   });
@@ -1844,8 +1822,9 @@ function renderCustomize(): string {
   const order = config.layout?.providerOrder ?? ALL_PROVIDERS.map(([id]) => id);
   const blocks = order
     .map((id) => {
-      const name = ALL_PROVIDERS.find(([pid]) => pid === id)?.[1] ?? id;
-      const snapshot = lastSnapshots.find((s) => s.id === id);
+      const snapshot = lastSnapshots.find((s) => snapshotCardId(s) === id);
+      const providerId = snapshot ? snapshotProviderId(snapshot) : id;
+      const name = snapshot?.name ?? ALL_PROVIDERS.find(([pid]) => pid === providerId)?.[1] ?? id;
       const L = providerLayout(id);
       const enabled = !config.disabled.includes(id);
 
@@ -2127,10 +2106,10 @@ async function refresh(force = false): Promise<void> {
       // in Customize (a fresh PC with zero AI tools sees just those two).
       const starters = new Set(["claude", "codex"]);
       const noCreds = snapshots
-        .filter((s) => s.status === "no_credentials" && !starters.has(s.id))
-        .map((s) => s.id);
+        .filter((s) => s.status === "no_credentials" && !starters.has(snapshotProviderId(s)))
+        .map(snapshotCardId);
       if (noCreds.length) {
-        snapshots = snapshots.filter((s) => !noCreds.includes(s.id));
+        snapshots = snapshots.filter((s) => !noCreds.includes(snapshotCardId(s)));
         await patchConfig({ disabled: noCreds }).catch(() => {});
       }
     } else if (config.layout) {
@@ -2140,9 +2119,12 @@ async function refresh(force = false): Promise<void> {
       const known = config.layout.providers;
       const fresh = snapshots
         .filter(
-          (s) => s.status === "no_credentials" && !(s.id in known) && !config.disabled.includes(s.id)
+          (s) =>
+            s.status === "no_credentials" &&
+            !(snapshotCardId(s) in known) &&
+            !config.disabled.includes(snapshotCardId(s)),
         )
-        .map((s) => s.id);
+        .map(snapshotCardId);
       if (fresh.length) {
         for (const id of fresh) known[id] = providerLayout(id);
         await patchConfig({
@@ -2154,7 +2136,10 @@ async function refresh(force = false): Promise<void> {
       // Updates also RETIRE providers; saved layouts keep referencing their
       // ids, which rendered ghost rows in Customize. Prune anything the app
       // no longer knows.
-      const valid = new Set(ALL_PROVIDERS.map(([id]) => id));
+      const valid = new Set([
+        ...ALL_PROVIDERS.map(([id]) => id),
+        ...snapshots.map(snapshotCardId),
+      ]);
       const prunedOrder = config.layout.providerOrder.filter((id) => valid.has(id));
       const staleLayout = Object.keys(config.layout.providers).filter((id) => !valid.has(id));
       const prunedDisabled = config.disabled.filter((id) => valid.has(id));
@@ -2243,14 +2228,14 @@ async function updateTrayStrip(): Promise<void> {
     if (config.disabled.includes(id)) continue; // no tray icons for disabled providers
     const L = providerLayout(id);
     if (!L.starred.length) continue;
-    const snap = lastSnapshots.find((s) => s.id === id && s.status === "ok");
+    const snap = lastSnapshots.find((s) => snapshotCardId(s) === id && s.status === "ok");
     if (!snap) continue;
     const starredMetrics = L.starred
       .map((label) => snap.metrics.find((m) => m.label === label && m.kind === "progress"))
       .filter((m): m is Metric => Boolean(m))
       .slice(0, 2);
     if (!starredMetrics.length) continue;
-    const logo = await rasterizeLogo(id);
+    const logo = await rasterizeLogo(snapshotProviderId(snap));
     if (!logo) continue;
     const values = starredMetrics.map((m) => Math.round(100 - clampPercent(m.used_percent ?? 0)));
     const tooltip = `${snap.name}\n${starredMetrics
@@ -2335,8 +2320,8 @@ function handleCustomizeClick(target: HTMLElement): boolean {
   const reset = target.closest<HTMLElement>("[data-reset]");
   if (reset && config.layout) {
     const id = reset.dataset.reset!;
-    const snapshot = lastSnapshots.find((s) => s.id === id);
-    const spend = lastSpend.find((sp) => sp.id === id);
+    const snapshot = lastSnapshots.find((s) => snapshotCardId(s) === id);
+    const spend = lastSpend.find((sp) => sp.id === (snapshot ? snapshotProviderId(snapshot) : id));
     config.layout.providers[id] = defaultProviderLayout(snapshot, spend, false);
     saveLayout();
     renderAll();
@@ -2520,7 +2505,7 @@ function populatePinnedOptions(): void {
     if (s.status !== "ok") continue;
     for (const m of s.metrics) {
       if (m.kind !== "progress") continue;
-      const value = `${s.id}::${m.label}`;
+      const value = `${snapshotCardId(s)}::${m.label}`;
       select.add(new Option(`${s.name} — ${m.label}`, value, false, value === current));
     }
   }
