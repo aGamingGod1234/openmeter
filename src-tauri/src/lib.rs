@@ -1,4 +1,5 @@
 mod alerts;
+pub mod accounts;
 mod httpapi;
 pub mod platform;
 mod pricing;

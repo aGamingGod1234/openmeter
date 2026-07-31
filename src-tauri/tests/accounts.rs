@@ -50,6 +50,7 @@ fn versioned_registry_round_trips_without_credentials() {
     .unwrap();
 
     registry.save(&path).expect("save registry");
+    registry.save(&path).expect("atomically replace registry");
     let raw = std::fs::read_to_string(&path).expect("read registry");
     assert!(raw.contains("\"version\": 1"));
     assert!(!raw.to_lowercase().contains("token"));
