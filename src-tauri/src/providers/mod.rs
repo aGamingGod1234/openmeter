@@ -253,22 +253,31 @@ impl ProviderRuntime {
 /// Computes a one-way cache identity from the account's actual local
 /// credential source. The bytes never leave this function.
 pub fn account_credential_stamp(account: &AccountContext) -> String {
+    let material = account_credential_material(account);
+    crate::redaction::credential_stamp(material.expose())
+}
+
+pub fn account_credential_material(account: &AccountContext) -> CredentialMaterial {
     let mut material = Vec::new();
+    let mut sources = Vec::new();
     material.extend_from_slice(account.card_id.as_bytes());
     for path in credential_paths(account) {
         if let Ok(bytes) = std::fs::read(&path) {
+            sources.push(path.to_string_lossy().to_string());
             material.extend_from_slice(path.to_string_lossy().as_bytes());
             material.extend_from_slice(&bytes);
         }
     }
     for variable in credential_environment_variables(&account.provider_id) {
         if let Ok(value) = std::env::var(variable) {
+            sources.push(format!("env:{variable}"));
             material.extend_from_slice(variable.as_bytes());
             material.extend_from_slice(value.as_bytes());
         }
     }
     for target in credential_manager_targets(&account.provider_id) {
         if let Some(bytes) = read_windows_credential(target) {
+            sources.push(format!("wincred:{target}"));
             material.extend_from_slice(target.as_bytes());
             material.extend_from_slice(&bytes);
         }
@@ -276,7 +285,56 @@ pub fn account_credential_stamp(account: &AccountContext) -> String {
     if material.len() == account.card_id.len() {
         material.extend_from_slice(b":no-local-credential");
     }
-    crate::redaction::credential_stamp(&material)
+    CredentialMaterial::new(
+        if sources.is_empty() {
+            "no-local-credential".to_string()
+        } else {
+            sources.join(";")
+        },
+        material,
+    )
+}
+
+pub fn runtime_for(provider_id: &str) -> Option<ProviderRuntime> {
+    let descriptor = provider_catalog()
+        .iter()
+        .find(|descriptor| descriptor.id == provider_id)?;
+    let id = descriptor.id;
+    Some(ProviderRuntime::new(
+        id,
+        |account| Ok(account_credential_material(account)),
+        move |_account, _credential| legacy_snapshot(id),
+    ))
+}
+
+fn legacy_snapshot(provider_id: &'static str) -> ProviderFetchFuture {
+    match provider_id {
+        "claude" => Box::pin(claude::snapshot()),
+        "codex" => Box::pin(codex::snapshot()),
+        "cursor" => Box::pin(cursor::snapshot()),
+        "antigravity" => Box::pin(antigravity::snapshot()),
+        "copilot" => Box::pin(copilot::snapshot()),
+        "devin" => Box::pin(devin::snapshot()),
+        "grok" => Box::pin(grok::snapshot()),
+        "opencode" => Box::pin(opencode::snapshot()),
+        "openrouter" => Box::pin(openrouter::snapshot()),
+        "zai" => Box::pin(zai::snapshot()),
+        "minimax" => Box::pin(minimax::snapshot()),
+        "deepseek" => Box::pin(deepseek::snapshot()),
+        "moonshot" => Box::pin(moonshot::snapshot()),
+        "elevenlabs" => Box::pin(elevenlabs::snapshot()),
+        "ollama" => Box::pin(ollama::snapshot()),
+        "codebuff" => Box::pin(codebuff::snapshot()),
+        "kilo" => Box::pin(kilo::snapshot()),
+        "aihubmix" => Box::pin(aihubmix::snapshot()),
+        _ => Box::pin(async move {
+            ProviderSnapshot::error(
+                provider_id,
+                provider_id,
+                "unknown provider runtime".to_string(),
+            )
+        }),
+    }
 }
 
 fn credential_paths(account: &AccountContext) -> Vec<PathBuf> {

@@ -296,36 +296,20 @@ impl CliOptions {
 }
 
 pub fn default_targets(disabled: &[String]) -> Vec<RefreshTarget> {
-    macro_rules! target {
-        ($id:literal, $snapshot:path) => {{
-            let account = AccountContext::default_for($id).expect("static provider id");
-            let stamp = providers::account_credential_stamp(&account);
-            RefreshTarget::new(account, stamp, || Box::pin($snapshot()))
-        }};
-    }
-    let targets = vec![
-        target!("claude", providers::claude::snapshot),
-        target!("codex", providers::codex::snapshot),
-        target!("cursor", providers::cursor::snapshot),
-        target!("opencode", providers::opencode::snapshot),
-        target!("copilot", providers::copilot::snapshot),
-        target!("grok", providers::grok::snapshot),
-        target!("devin", providers::devin::snapshot),
-        target!("minimax", providers::minimax::snapshot),
-        target!("openrouter", providers::openrouter::snapshot),
-        target!("zai", providers::zai::snapshot),
-        target!("antigravity", providers::antigravity::snapshot),
-        target!("deepseek", providers::deepseek::snapshot),
-        target!("moonshot", providers::moonshot::snapshot),
-        target!("elevenlabs", providers::elevenlabs::snapshot),
-        target!("ollama", providers::ollama::snapshot),
-        target!("codebuff", providers::codebuff::snapshot),
-        target!("kilo", providers::kilo::snapshot),
-        target!("aihubmix", providers::aihubmix::snapshot),
-    ];
-    targets
-        .into_iter()
-        .filter(|target| !disabled.iter().any(|id| id == &target.account.provider_id))
+    providers::provider_catalog()
+        .iter()
+        .filter(|descriptor| !disabled.iter().any(|id| id == descriptor.id))
+        .filter_map(|descriptor| {
+            let account = AccountContext::default_for(descriptor.id).ok()?;
+            let runtime = providers::runtime_for(descriptor.id)?;
+            let stamp = runtime.probe(&account).ok()?.credential_stamp;
+            let runtime_account = account.clone();
+            Some(RefreshTarget::new(account, stamp, move || {
+                let runtime = runtime.clone();
+                let account = runtime_account.clone();
+                Box::pin(async move { runtime.refresh(&account).await })
+            }))
+        })
         .collect()
 }
 
