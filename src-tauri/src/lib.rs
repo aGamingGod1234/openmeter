@@ -5,6 +5,7 @@ pub mod contracts;
 pub mod httpapi;
 pub mod platform;
 pub mod refresh;
+pub mod redaction;
 mod pricing;
 pub mod providers;
 mod spend;
