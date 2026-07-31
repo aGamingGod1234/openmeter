@@ -30,6 +30,32 @@ fn config_path() -> PathBuf {
     providers::config_dir().join("config.json")
 }
 
+fn account_registry_path() -> PathBuf {
+    providers::config_dir().join("accounts-v1.json")
+}
+
+#[tauri::command]
+fn get_accounts() -> Result<Vec<accounts::AccountContext>, String> {
+    Ok(accounts::AccountRegistry::load(&account_registry_path())?
+        .accounts()
+        .to_vec())
+}
+
+#[tauri::command]
+fn save_account(account: accounts::AccountContext) -> Result<(), String> {
+    let mut registry = accounts::AccountRegistry::load(&account_registry_path())?;
+    registry.upsert(account)?;
+    registry.save(&account_registry_path())
+}
+
+#[tauri::command]
+fn remove_account(card_id: String) -> Result<bool, String> {
+    let mut registry = accounts::AccountRegistry::load(&account_registry_path())?;
+    let removed = registry.remove(&card_id)?;
+    registry.save(&account_registry_path())?;
+    Ok(removed)
+}
+
 /// A parse failure here once silently reset all settings to defaults, so
 /// failures are now logged durably and the last good copy is used instead.
 fn note_config_error(context: &str) {
@@ -1014,6 +1040,9 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![
             fetch_usage,
+            get_accounts,
+            save_account,
+            remove_account,
             fetch_spend,
             set_api_key,
             get_config,

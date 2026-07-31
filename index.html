@@ -210,6 +210,27 @@
       </div>
 
       <div class="acc-group">
+        <button class="acc-head">Accounts <span class="chev">&#8964;</span></button>
+        <div class="acc-body"><div class="acc-inner">
+          <p class="settings-note">
+            Add an isolated Claude Code or Codex CLI profile. Each profile gets
+            its own card, cache, layout, stale state, and tray stars.
+          </p>
+          <div id="account-list"></div>
+          <div class="account-editor">
+            <select id="account-provider" aria-label="Provider">
+              <option value="claude">Claude</option>
+              <option value="codex">Codex</option>
+            </select>
+            <input id="account-id" type="text" placeholder="ID, e.g. work" spellcheck="false" />
+            <input id="account-label" type="text" placeholder="Card name, e.g. Work" />
+            <input id="account-directory" type="text" placeholder="CLI credential directory" spellcheck="false" />
+            <button id="account-add" type="button">Add account</button>
+          </div>
+        </div></div>
+      </div>
+
+      <div class="acc-group">
         <button class="acc-head">API keys <span class="chev">&#8964;</span></button>
         <div class="acc-body"><div class="acc-inner">
           <p class="settings-note">

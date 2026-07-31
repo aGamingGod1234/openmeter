@@ -106,6 +106,26 @@ impl AccountRegistry {
         &self.accounts
     }
 
+    pub fn upsert(&mut self, account: AccountContext) -> Result<(), String> {
+        if let Some(existing) = self
+            .accounts
+            .iter_mut()
+            .find(|existing| existing.card_id == account.card_id)
+        {
+            *existing = account;
+        } else {
+            self.accounts.push(account);
+        }
+        self.validate()
+    }
+
+    pub fn remove(&mut self, card_id: &str) -> Result<bool, String> {
+        let before = self.accounts.len();
+        self.accounts.retain(|account| account.card_id != card_id);
+        self.validate()?;
+        Ok(before != self.accounts.len())
+    }
+
     pub fn match_token(&self, token: &str) -> Vec<&AccountContext> {
         self.accounts
             .iter()

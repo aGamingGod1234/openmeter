@@ -41,6 +41,20 @@ fn matching_is_exact_for_cards_and_family_wide_for_providers() {
 }
 
 #[test]
+fn account_crud_preserves_card_identity_and_removes_only_the_selected_account() {
+    let mut registry = AccountRegistry::default();
+    let work = AccountContext::named("claude", "work", "Work").unwrap();
+    registry.upsert(work.clone()).unwrap();
+    let renamed = AccountContext::named("claude", "work", "Company").unwrap();
+    registry.upsert(renamed).unwrap();
+    assert_eq!(registry.accounts().len(), 1);
+    assert_eq!(registry.accounts()[0].card_id, work.card_id);
+    assert!(registry.remove("claude--work").unwrap());
+    assert!(registry.accounts().is_empty());
+    assert!(!registry.remove("claude--work").unwrap());
+}
+
+#[test]
 fn versioned_registry_round_trips_without_credentials() {
     let path = temp_registry_path();
     let registry = AccountRegistry::from_accounts(vec![

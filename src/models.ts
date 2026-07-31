@@ -26,6 +26,8 @@ export interface Snapshot {
   warning: string | null;
 }
 
+export type { AccountRecord } from "./accounts-ui";
+
 export function snapshotProviderId(snapshot: Snapshot): string {
   return snapshot.provider_id?.trim() || snapshot.id;
 }

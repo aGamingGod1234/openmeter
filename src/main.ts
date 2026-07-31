@@ -5,6 +5,12 @@ import type { Metric, Snapshot } from "./models";
 import { snapshotProviderId } from "./models";
 import type { Layout, ProviderLayout } from "./layout";
 import { migrateLayout, snapshotCardId } from "./layout";
+import {
+  accountLabel,
+  createNamedAccount,
+  renameAccount,
+  type AccountRecord,
+} from "./accounts-ui";
 
 // Injected by vite.config.ts at build time, e.g. "0707.1432".
 declare const __BUILD_STAMP__: string;
@@ -2497,6 +2503,76 @@ async function saveApiKey(provider: string): Promise<void> {
   }
 }
 
+let accountRecords: AccountRecord[] = [];
+
+function renderAccounts(): void {
+  const list = document.querySelector<HTMLElement>("#account-list")!;
+  list.innerHTML = accountRecords.length
+    ? accountRecords
+        .map(
+          (account) => `
+            <div class="account-row" data-account="${escapeHtml(account.card_id)}">
+              <span>${escapeHtml(account.provider_id === "codex" ? "Codex" : "Claude")}</span>
+              <input type="text" data-account-label value="${escapeHtml(accountLabel(account))}" aria-label="Account name" />
+              <button type="button" data-account-rename>Save</button>
+              <button type="button" data-account-remove>Remove</button>
+            </div>`,
+        )
+        .join("")
+    : `<p class="settings-note">No named accounts yet.</p>`;
+}
+
+async function loadAccounts(): Promise<void> {
+  accountRecords = await invoke<AccountRecord[]>("get_accounts");
+  renderAccounts();
+}
+
+async function addAccount(): Promise<void> {
+  const provider = document.querySelector<HTMLSelectElement>("#account-provider")!.value;
+  const id = document.querySelector<HTMLInputElement>("#account-id")!;
+  const label = document.querySelector<HTMLInputElement>("#account-label")!;
+  const directory = document.querySelector<HTMLInputElement>("#account-directory")!;
+  const status = document.querySelector("#status")!;
+  try {
+    const account = createNamedAccount(provider, id.value, label.value, directory.value);
+    await invoke("save_account", { account });
+    id.value = "";
+    label.value = "";
+    directory.value = "";
+    await loadAccounts();
+    status.textContent = `${account.display_name} added`;
+    await refresh(true);
+  } catch (error) {
+    status.textContent = `Could not add account: ${error}`;
+  }
+}
+
+async function handleAccountClick(target: HTMLElement): Promise<void> {
+  const row = target.closest<HTMLElement>("[data-account]");
+  if (!row) return;
+  const account = accountRecords.find((entry) => entry.card_id === row.dataset.account);
+  if (!account) return;
+  const status = document.querySelector("#status")!;
+  try {
+    if (target.closest("[data-account-remove]")) {
+      await invoke("remove_account", { cardId: account.card_id });
+      accountRecords = accountRecords.filter((entry) => entry.card_id !== account.card_id);
+      renderAccounts();
+      status.textContent = `${account.display_name} removed`;
+      await refresh(true);
+    } else if (target.closest("[data-account-rename]")) {
+      const label = row.querySelector<HTMLInputElement>("[data-account-label]")!.value;
+      const renamed = renameAccount(account, label);
+      await invoke("save_account", { account: renamed });
+      await loadAccounts();
+      status.textContent = `${renamed.display_name} saved`;
+      await refresh(true);
+    }
+  } catch (error) {
+    status.textContent = `Could not update account: ${error}`;
+  }
+}
+
 function populatePinnedOptions(): void {
   const select = document.querySelector<HTMLSelectElement>("#pinned")!;
   const current = config.pinned ? `${config.pinned.provider}::${config.pinned.label}` : "";
@@ -2621,6 +2697,7 @@ async function initSettings(): Promise<void> {
   proxyUrl.addEventListener("change", saveProxy);
 
   populatePinnedOptions();
+  await loadAccounts();
 }
 
 // ---------------------------------------------------------------------------
@@ -2704,6 +2781,10 @@ window.addEventListener("DOMContentLoaded", () => {
   setupCustomizeDnD(drawerBody);
   document.querySelectorAll<HTMLButtonElement>("[data-save]").forEach((btn) => {
     btn.addEventListener("click", () => void saveApiKey(btn.dataset.save!));
+  });
+  document.querySelector("#account-add")!.addEventListener("click", () => void addAccount());
+  document.querySelector("#account-list")!.addEventListener("click", (event) => {
+    void handleAccountClick(event.target as HTMLElement);
   });
 
   const providersEl = document.querySelector<HTMLElement>("#providers")!;

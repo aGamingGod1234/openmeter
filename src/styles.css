@@ -2090,3 +2090,32 @@ body.no-glass #confirm-box {
     animation: none;
   }
 }
+
+.account-editor,
+.account-row {
+  display: grid;
+  gap: 7px;
+  margin-top: 9px;
+}
+
+.account-editor {
+  grid-template-columns: 1fr 1fr;
+}
+
+.account-editor #account-directory {
+  grid-column: 1 / -1;
+}
+
+.account-editor button {
+  grid-column: 1 / -1;
+}
+
+.account-row {
+  grid-template-columns: auto 1fr auto auto;
+  align-items: center;
+}
+
+.account-row span {
+  color: var(--muted);
+  font-size: 11px;
+}
