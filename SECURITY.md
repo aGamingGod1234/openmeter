@@ -56,14 +56,14 @@ All of this is auditable in the source — links go to the exact code.
 - **Credential files are backed up before write.** When Pane writes a
   refreshed OAuth token back to a CLI's credential file, it first copies
   the original to `*.pane-bak` — a bad write can never cost you a login.
-- **API keys you paste** are stored in `%APPDATA%\Pane` on your PC,
+- **API keys you paste** are stored in `%APPDATA%\OpenMeter` on your PC,
   readable only by your Windows user, and sent only to their own vendor.
 
 ## Known limitations (honesty section)
 
 - The installer is **not yet Authenticode-signed**, so SmartScreen warns
   on first run. Updates are minisign-verified regardless. A code-signing
-  certificate is planned. (The `irm pane.jazii.dev/install.ps1 | iex`
+  certificate is planned. (The published `install.ps1`
   install path and winget don't trigger SmartScreen.)
 - Release binaries are built by GitHub Actions from the pushed tag —
   see [.github/workflows/release.yml](.github/workflows/release.yml);
@@ -87,5 +87,5 @@ All of this is auditable in the source — links go to the exact code.
 
 ## Supported versions
 
-Only the [latest release](https://github.com/ItsJazii/pane/releases/latest)
+Only the [latest release](https://github.com/aGamingGod1234/openmeter/releases/latest)
 is supported. The auto-updater keeps installs current.

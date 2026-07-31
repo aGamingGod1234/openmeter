@@ -127,7 +127,7 @@ async fn load_access() -> Result<Access, String> {
             doc["last_refresh"] = Value::from(Utc::now().to_rfc3339());
             // Keep a copy of the CLI's own file before touching it, so a bad
             // write can never cost the user their login.
-            let _ = std::fs::copy(&path, path.with_extension("json.pane-bak"));
+            let _ = std::fs::copy(&path, path.with_extension("json.openmeter-bak"));
             let tmp = path.with_extension("json.tmp");
             std::fs::write(&tmp, serde_json::to_string_pretty(&doc).unwrap_or(raw))
                 .and_then(|_| std::fs::rename(&tmp, &path))
@@ -315,7 +315,7 @@ async fn fetch_reset_credits(access: &str, account_id: &str) -> Option<Vec<(Stri
 pub async fn redeem_credit(credit_id: &str) -> Result<String, String> {
     let auth = load_access().await?;
     let redeem_request_id = format!(
-        "openusage-{}-{}",
+        "openmeter-codex-{}-{}",
         Utc::now().timestamp_millis(),
         std::process::id()
     );

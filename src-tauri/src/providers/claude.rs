@@ -80,7 +80,7 @@ async fn fetch() -> Result<Snapshot, String> {
             // instead of leaving a bare HTTP code on the card.
             if body.contains("invalid_grant") {
                 return Err(
-                    "Claude sign-in was rotated by another app — run `claude` in a terminal once and Pane recovers automatically"
+                    "Claude sign-in was rotated by another app — run `claude` in a terminal once and OpenMeter recovers automatically"
                         .into(),
                 );
             }
@@ -109,7 +109,7 @@ async fn fetch() -> Result<Snapshot, String> {
             entry["expiresAt"] = Value::from(now_ms + expires_in * 1000);
             // Keep a copy of the CLI's own file before touching it, so a bad
             // write can never cost the user their login.
-            let _ = std::fs::copy(&path, path.with_extension("json.pane-bak"));
+            let _ = std::fs::copy(&path, path.with_extension("json.openmeter-bak"));
             let tmp = path.with_extension("json.tmp");
             std::fs::write(&tmp, serde_json::to_string_pretty(&doc).unwrap_or(raw))
                 .and_then(|_| std::fs::rename(&tmp, &path))

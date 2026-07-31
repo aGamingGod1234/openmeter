@@ -1,4 +1,4 @@
-//! Anonymous, opt-out usage telemetry — Pane's port of OpenUsage's
+//! Anonymous, opt-in usage telemetry — OpenMeter's port of OpenUsage's
 //! leashed-PostHog design (daily rollups, IDs/counts/enums only, hard-stop
 //! opt-out). No SDK: events are plain documented POSTs to PostHog's batch
 //! API, so everything that can ever leave the machine is in this one file.
@@ -35,7 +35,7 @@ const TOKEN: &str = "phc_BBzyxRRRnrspg9VEyczEDBNPXjvvAZ7VbrJ2BWuhFPzt";
 const ENDPOINT: &str = "https://us.i.posthog.com/batch/";
 
 // ---------------------------------------------------------------------------
-// State (persisted at %APPDATA%\Pane\telemetry.json)
+// State (persisted at %APPDATA%\OpenMeter\telemetry.json)
 // ---------------------------------------------------------------------------
 
 #[derive(Default, Clone, Serialize, Deserialize)]
@@ -247,7 +247,7 @@ fn event(name: &str, uuid: &str, mut props: Value) -> Value {
     // Anonymous event: PostHog must never build a person profile for it
     // (the Mac app's `personProfiles = .never`, per event).
     props["$process_person_profile"] = json!(false);
-    props["$lib"] = json!("pane");
+    props["$lib"] = json!("openmeter");
     json!({
         "event": name,
         "distinct_id": uuid,

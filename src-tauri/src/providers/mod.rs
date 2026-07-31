@@ -150,7 +150,7 @@ fn proxy_url() -> Option<&'static str> {
 
 pub fn http() -> reqwest::Client {
     let mut builder = reqwest::Client::builder()
-        .user_agent("Pane-Windows/0.3")
+        .user_agent("OpenMeter-Windows/0.4")
         .timeout(std::time::Duration::from_secs(20));
     if let Some(url) = proxy_url() {
         if let Ok(proxy) = reqwest::Proxy::all(url) {
@@ -161,28 +161,11 @@ pub fn http() -> reqwest::Client {
     builder.build().expect("failed to build http client")
 }
 
-/// Where Pane keeps its own settings, e.g. saved API keys:
-/// C:\Users\you\AppData\Roaming\Pane
+/// Where OpenMeter keeps settings, API keys, and local caches.
 ///
-/// The app shipped as "OpenUsage" before the rename — on first call, an
-/// existing %APPDATA%\OpenUsage is moved over so nobody loses their config,
-/// keys, or caches. If the move fails but the old dir is usable, keep using
-/// the old dir rather than silently starting fresh.
+/// A first launch migrates an existing Pane or legacy OpenUsage directory.
 pub fn config_dir() -> PathBuf {
-    static DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
-    DIR.get_or_init(|| {
-        let base = dirs::config_dir().unwrap_or_default();
-        let new = base.join("Pane");
-        let old = base.join("OpenUsage");
-        if !new.exists() && old.exists() {
-            let _ = std::fs::rename(&old, &new);
-            if !new.exists() {
-                return old;
-            }
-        }
-        new
-    })
-    .clone()
+    crate::platform::config_dir()
 }
 
 /// Reads a generic credential's blob from Windows Credential Manager.
@@ -228,7 +211,7 @@ pub fn credential_string(target: &str) -> Option<String> {
 }
 
 /// Percent-used meter for pay-as-you-go balances. These APIs report only
-/// what's left — never "of how much" — so Pane remembers the highest
+/// what's left — never "of how much" — so OpenMeter remembers the highest
 /// balance it has ever seen per provider (a top-up raises it automatically)
 /// and meters usage against that high-water mark. Persisted so restarts
 /// keep the story. As a progress row it also feeds the notification rules

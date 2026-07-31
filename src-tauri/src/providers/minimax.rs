@@ -227,7 +227,7 @@ pub fn collect_usage_events() -> Vec<UsageEvent> {
         }
     }
 
-    let tmp_base = std::env::temp_dir().join(format!("pane-minimax-{}", std::process::id()));
+    let tmp_base = std::env::temp_dir().join(format!("openmeter-minimax-{}", std::process::id()));
     let tmp_db = tmp_base.with_extension("db");
     let events = snapshot_db(&db_path, &tmp_db).and_then(|()| read_usage_events(&tmp_db));
     for suffix in ["db", "db-wal", "db-shm"] {

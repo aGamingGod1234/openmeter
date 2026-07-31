@@ -1,6 +1,6 @@
 # Local HTTP API
 
-Pane serves your usage as JSON so your own scripts, widgets, and overlays
+OpenMeter serves your usage as JSON so your own scripts, widgets, and overlays
 can read it.
 
 ```
@@ -36,7 +36,7 @@ Wire format (compatible with the macOS OpenUsage API):
   credentials, tokens, or keys.
 - **No CORS headers.** Unlike the macOS app (which sends
   `Access-Control-Allow-Origin: *` and documents that any web page can
-  read your usage), Pane sends no CORS headers — so browsers block web
+  read your usage), OpenMeter sends no CORS headers — so browsers block web
   pages from reading this API. PowerShell, curl, Rainmeter, and native
   apps are unaffected; CORS only constrains browsers.
 - **No authentication.** Any program running as your Windows user can

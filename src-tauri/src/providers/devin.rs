@@ -207,7 +207,7 @@ pub fn collect_usage_events() -> Vec<UsageEvent> {
     // Devin app writes new rows to the WAL continuously, and a raw copy of
     // db + WAL taken at slightly different instants makes SQLite silently
     // discard the WAL — recent sessions would just vanish from the totals.
-    let tmp_base = std::env::temp_dir().join(format!("pane-devin-{}", std::process::id()));
+    let tmp_base = std::env::temp_dir().join(format!("openmeter-devin-{}", std::process::id()));
     let tmp_db = tmp_base.with_extension("db");
     let events = snapshot_db(&db_path, &tmp_db).and_then(|()| read_usage_events(&tmp_db));
 

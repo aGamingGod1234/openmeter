@@ -1,6 +1,6 @@
 <div align="center">
 
-# Pane
+# OpenMeter
 
 **All your AI subscription limits in one liquid-glass tray popover for Windows.**
 
@@ -8,15 +8,15 @@ One click on the tray icon answers the questions every AI power user keeps
 asking: *How much of my Claude session is left? When does my Codex weekly
 reset? What did today actually cost me?*
 
-**[pane.jazii.dev](https://pane.jazii.dev)** · [Install](#install) · [How it works](#how-it-works) · [Providers](#providers-17-and-counting) · [Features](#features) · [Privacy](#privacy--security) · [Credits](#credits)
+**[GitHub](https://github.com/aGamingGod1234/openmeter)** · [Install](#install) · [How it works](#how-it-works) · [Providers](#providers-18-and-counting) · [Features](#features) · [Privacy](#privacy--security) · [Credits](#credits)
 
-<img src="docs/promo.png" width="760" alt="Pane — track all your AI subscription limits in one tray app: Total Spend donut with per-provider slices, usage cards with pace bars" />
+<img src="docs/promo.png" width="760" alt="OpenMeter — track all your AI subscription limits in one tray app" />
 
 </div>
 
 ---
 
-## Why Pane
+## Why OpenMeter
 
 If you use AI coding tools seriously, you're juggling half a dozen separate
 subscriptions — Claude Max, ChatGPT/Codex, Copilot, Cursor, and whatever
@@ -24,11 +24,10 @@ else this month brought. Each one hides its limits behind its own dashboard,
 counts in its own units, and resets on its own schedule. The only time you
 find out you're running low is when you hit the wall mid-task.
 
-Pane puts all of them in one place, in your system tray, refreshed every few
-minutes, with pace warnings *before* you hit the wall. It started as a
-Windows rebuild of the excellent [OpenUsage for macOS](https://github.com/robinebers/openusage)
-by [Robin Ebers](https://github.com/robinebers) and is growing into a
-broader AI-workflow companion from there.
+OpenMeter puts all of them in one place, in your system tray, refreshed every
+few minutes, with pace warnings *before* you hit the wall. It is a Windows 11
+application derived from [Pane](https://github.com/ItsJazii/pane) and designed
+for feature parity with [OpenUsage for macOS](https://github.com/robinebers/openusage).
 
 ## Install
 
@@ -38,37 +37,28 @@ from the tagged source — public build logs, verifiable provenance.
 ### One-liner (PowerShell — recommended)
 
 ```powershell
-irm https://pane.jazii.dev/install.ps1 | iex
+irm https://raw.githubusercontent.com/aGamingGod1234/openmeter/main/install.ps1 | iex
 ```
 
 Downloads the latest release, verifies its SHA-256, installs per-user
-(no admin), and launches Pane. No SmartScreen prompt. Read
+(no admin), and launches OpenMeter. Read
 [install.ps1](install.ps1) first if you like — it's one short, commented script.
 
 ### Installer (.exe)
 
-1. Grab **`Pane_x.y.z_x64-setup.exe`** from the
-   [latest release](https://github.com/ItsJazii/pane/releases/latest).
-2. Run it. Pane installs per-user to `%LOCALAPPDATA%\Pane` — no admin
+1. Grab **`OpenMeter_x.y.z_x64-setup.exe`** from the
+   [latest release](https://github.com/aGamingGod1234/openmeter/releases/latest).
+2. Run it. OpenMeter installs per-user to `%LOCALAPPDATA%\OpenMeter` — no admin
    rights needed.
-3. Look for the Pane icon in the system tray (next to the clock). Click it.
+3. Look for the OpenMeter icon in the system tray (next to the clock). Click it.
 
 > **SmartScreen note:** the installer isn't code-signed yet, so Windows may
 > show "Windows protected your PC." Click **More info → Run anyway**. Code
 > signing is on the roadmap.
 
-Silent install (for scripts): `Pane_x.y.z_x64-setup.exe /S`
+Silent install (for scripts): `OpenMeter_x.y.z_x64-setup.exe /S`
 
-### winget *(pending review)*
-
-Pane is [submitted to the winget community repo](https://github.com/microsoft/winget-pkgs/pull/399096).
-Once Microsoft's review merges it, this works:
-
-```
-winget install pane
-```
-
-Pane keeps itself current after that either way — every install checks for
+OpenMeter keeps itself current after that — every install checks for
 signed updates and offers a one-click restart when a new version ships.
 
 ### Build from source
@@ -77,8 +67,8 @@ Prerequisites: Node.js 20+, Rust (stable-msvc), Visual Studio C++ Build
 Tools, WebView2 (bundled with Windows 11).
 
 ```
-git clone https://github.com/ItsJazii/pane
-cd pane
+git clone https://github.com/aGamingGod1234/openmeter
+cd openmeter
 npm install
 npm run tauri dev     # run with hot reload
 npm run tauri build   # installer lands in src-tauri/target/release/bundle
@@ -86,7 +76,7 @@ npm run tauri build   # installer lands in src-tauri/target/release/bundle
 
 ## How it works
 
-Pane is a small Tauri v2 app: a Rust core doing the data work, a vanilla
+OpenMeter is a small Tauri v2 app: a Rust core doing the data work, a vanilla
 TypeScript UI doing the glass. No Electron, no background services — one
 ~10 MB process idling around 90 MB of RAM.
 
@@ -94,7 +84,7 @@ TypeScript UI doing the glass. No Electron, no background services — one
 keep their login tokens in well-known per-user locations — Claude Code
 writes `%USERPROFILE%\.claude\.credentials.json`, Codex CLI writes
 `%USERPROFILE%\.codex\auth.json`, the GitHub CLI stores its token in
-Windows Credential Manager, and so on. Pane reads those same files (or
+Windows Credential Manager, and so on. OpenMeter reads those same files (or
 takes an API key you paste into Settings) and shows a card for every tool
 it finds. Tools it can't find start disabled — no dead cards.
 
@@ -112,7 +102,7 @@ amber/red as the math worsens and optional Windows toasts fire once per
 reset window ("Almost out", "Will run out").
 
 **4. Counting the money.** Your CLIs already log every request locally.
-Pane scans those logs (Claude, Codex, Grok, OpenCode, Devin CLI, Cursor
+OpenMeter scans those logs (Claude, Codex, Grok, OpenCode, Devin CLI, Cursor
 CSV, MiniMax CLI, Kimi Code, the Hermes desktop app), prices each
 request with live per-model rates (LiteLLM /
 models.dev, refreshed daily — hourly while unknown models are around, so
@@ -127,15 +117,13 @@ cost runs a little higher than shown.
 
 **5. Staying local.** All of the above happens on your machine. There is
 no account, and your quotas, spend, and provider data never leave your
-PC. Pane reports two things about itself, both anonymous: the update
-check (country-level counting, no IPs stored) and an opt-out once-a-day
-statistic (random ID, version, which providers are enabled, provider
-success/failure counts — never amounts or error text) — see
-[Privacy](#privacy--security) for the full contract and the off switch.
+PC. Update checks fetch a signed manifest from GitHub. Optional anonymous
+daily statistics are disabled by default and require explicit opt-in; see
+[Privacy](#privacy--security) for the complete contract.
 
 ## Providers (18 and counting)
 
-| Provider | How Pane connects |
+| Provider | How OpenMeter connects |
 |---|---|
 | Claude (Claude Code) | `%USERPROFILE%\.claude\.credentials.json` + Anthropic usage API |
 | Codex (Codex CLI) | `%USERPROFILE%\.codex\auth.json` + ChatGPT usage API, incl. reset-credit redemption |
@@ -174,7 +162,7 @@ whatever the community asks for loudest.
   dollars ⇄ tokens.
 - **Codex reset credits** — see each banked credit's exact expiry and
   redeem it with one click.
-- **Signed auto-updates** — Pane checks for updates every time you open
+- **Signed auto-updates** — OpenMeter checks for updates every time you open
   it (and every 4 hours in the background); when a release is out, the
   footer version stamp becomes an Update button — one click downloads,
   verifies the signature, and restarts.
@@ -189,7 +177,7 @@ whatever the community asks for loudest.
 - **Share cards** — hover a card, click ⧉, and paste anywhere: a
   collapsed card copies as a clean compact composition, an expanded one
   copies whole (trend, spend, pace hints — buttons and links stripped),
-  framed with the Pane icon and tagline.
+  framed with the OpenMeter icon and tagline.
 - **Quick links** — Status / Dashboard shortcuts on every card.
 - **[Local HTTP API](docs/local-http-api.md)** — `GET
   http://127.0.0.1:6736/v1/usage` for scripts, Rainmeter widgets, stream
@@ -200,13 +188,12 @@ whatever the community asks for loudest.
 
 ## Privacy & security
 
-Pane reads credential files. You should not take our word for how it
+OpenMeter reads credential files. You should not take our word for how it
 treats them — verify it:
 
 - **[docs/privacy.md](docs/privacy.md)** — the complete list of every
-  network call Pane can make. No event streams, no session recording,
-  no autocapture; the update check counts anonymous daily installs by
-  country (no IPs stored), and an opt-out daily statistic reports
+  network call OpenMeter can make. No event streams, no session recording,
+  no autocapture; an opt-in daily statistic can report
   version + enabled providers + refresh success/failure counts under a
   random ID attached to nothing. That document explains exactly how,
   field by field.
@@ -219,7 +206,7 @@ treats them — verify it:
   with public build logs).
 
 The short version: tokens are sent only to their own vendor's API over
-HTTPS; pasted keys live in `%APPDATA%\Pane`, readable only by your
+HTTPS; pasted keys live in `%APPDATA%\OpenMeter`, readable only by your
 Windows user; spend accounting parses your local logs locally; the HTTP
 API is loopback-only with no CORS; updates are signature-verified.
 
@@ -231,19 +218,17 @@ outbound proxy · API keys.
 
 ## Credits
 
-Pane exists because of
-**[OpenUsage for macOS](https://github.com/robinebers/openusage)** by
-**[Robin Ebers](https://github.com/robinebers)** (MIT). The hard part of a
+OpenMeter is derived from **[Pane](https://github.com/ItsJazii/pane)** by
+**Jazii** and **[OpenUsage for macOS](https://github.com/robinebers/openusage)**
+by **[Robin Ebers](https://github.com/robinebers)** (both MIT). The hard part of a
 tool like this — knowing which credential files to read, which
 undocumented usage endpoints to call, and how to interpret their
-responses — is research Robin did first and published openly. Pane is an
-independent from-scratch rebuild for Windows (Rust + TypeScript instead of
-Swift), but it stands on that research and gladly says so. If you're on a
-Mac, use his app.
+responses — is research Robin and Pane's contributors published openly.
+OpenMeter keeps that attribution and extends the Windows implementation.
 
 Additional thanks:
 
-- [Tauri](https://tauri.app/) — the app shell that keeps Pane tiny.
+- [Tauri](https://tauri.app/) — the app shell that keeps OpenMeter tiny.
 - [prasen.dev](https://www.prasen.dev/) — the original SDF liquid-glass
   lens technique the UI's refraction is ported from.
 - [LiteLLM](https://github.com/BerriAI/litellm) and
@@ -252,11 +237,11 @@ Additional thanks:
 - [shadcn/ui](https://ui.shadcn.com/) — the zinc design tokens the theme
   is built on.
 
-Pane is not affiliated with or endorsed by Robin Ebers or any of the AI
+OpenMeter is not affiliated with or endorsed by Pane, Robin Ebers, or any of the AI
 vendors listed. Provider names and logos belong to their respective owners
 and are used only to identify the services.
 
 ## License
 
-[MIT](LICENSE) — © 2026 Jazii, with provider research credit to Robin
-Ebers' OpenUsage (MIT).
+[MIT](LICENSE) — © 2026 OpenMeter contributors, retaining the upstream
+Pane and OpenUsage notices and attribution.

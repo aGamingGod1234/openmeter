@@ -1,5 +1,6 @@
 mod alerts;
 mod httpapi;
+pub mod platform;
 mod pricing;
 mod providers;
 mod spend;
@@ -17,7 +18,7 @@ use tauri::{
 };
 
 // ---------------------------------------------------------------------------
-// App settings, stored at %APPDATA%\Pane\config.json
+// App settings, stored at %APPDATA%\OpenMeter\config.json
 // ---------------------------------------------------------------------------
 
 fn config_path() -> PathBuf {
@@ -33,7 +34,7 @@ fn note_config_error(context: &str) {
     if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
         let _ = f.write_all(line.as_bytes());
     }
-    eprintln!("[pane] {context}");
+    eprintln!("[openmeter] {context}");
 }
 
 fn parse_config_file(path: &PathBuf) -> Result<Value, String> {
@@ -99,7 +100,7 @@ fn config_with_defaults(mut cfg: Value) -> Value {
     // Settings toggle read `undefined` (rendered off) while the sender's
     // own default kept transmitting — a switch that displays off while
     // data flows is the one state a privacy control must never be in.
-    obj.entry("telemetry").or_insert(json!(true));
+    obj.entry("telemetry").or_insert(json!(false));
     cfg
 }
 
@@ -149,7 +150,7 @@ fn set_config(patch: Value) -> Result<Value, String> {
             if CONFIG_KEYS.contains(&k.as_str()) {
                 target.insert(k.clone(), v.clone());
             } else {
-                eprintln!("[pane] set_config: ignoring unknown key '{k}'");
+                eprintln!("[openmeter] set_config: ignoring unknown key '{k}'");
             }
         }
     }
@@ -321,7 +322,7 @@ fn update_tray(app: &tauri::AppHandle, snapshots: &[providers::Snapshot], cfg: &
         return;
     };
 
-    let mut tooltip = String::from("Pane");
+    let mut tooltip = String::from("OpenMeter");
     for s in snapshots.iter().filter(|s| s.status == "ok").take(6) {
         if let Some(m) = s.metrics.iter().find(|m| m.kind == "progress") {
             let left = (100.0 - m.used_percent.unwrap_or(0.0)).clamp(0.0, 100.0).round();
@@ -584,7 +585,7 @@ async fn fetch_usage(app: tauri::AppHandle) -> Vec<providers::Snapshot> {
 
     for s in &all {
         eprintln!(
-            "[pane] {}: {} ({} metrics){}",
+            "[openmeter] {}: {} ({} metrics){}",
             s.id,
             s.status,
             s.metrics.len(),
@@ -661,7 +662,7 @@ async fn fetch_usage(app: tauri::AppHandle) -> Vec<providers::Snapshot> {
     // Anonymous daily-rollup telemetry (Settings → "Share anonymous usage
     // statistics"). Fire-and-forget: it must never delay or fail a refresh.
     {
-        let enabled = cfg.get("telemetry").and_then(Value::as_bool).unwrap_or(true);
+        let enabled = cfg.get("telemetry").and_then(Value::as_bool).unwrap_or(false);
         let starred_metrics: Vec<String> = cfg
             .pointer("/layout/providers")
             .and_then(Value::as_object)
@@ -728,7 +729,7 @@ async fn fetch_usage(app: tauri::AppHandle) -> Vec<providers::Snapshot> {
 /// own session logs. Heavy file IO, so it runs on a blocking thread.
 #[tauri::command]
 async fn fetch_spend() -> Vec<spend::ProviderSpend> {
-    eprintln!("[pane] spend: scan starting");
+    eprintln!("[openmeter] spend: scan starting");
     let started = std::time::Instant::now();
     // Cursor's CSV export needs the async client; fetch it here and hand it
     // to the blocking scan.
@@ -737,7 +738,7 @@ async fn fetch_spend() -> Vec<spend::ProviderSpend> {
         .await
         .unwrap_or_default();
     eprintln!(
-        "[pane] spend: {} providers in {:?}",
+        "[openmeter] spend: {} providers in {:?}",
         result.len(),
         started.elapsed()
     );
@@ -745,7 +746,7 @@ async fn fetch_spend() -> Vec<spend::ProviderSpend> {
 }
 
 /// Saves (or clears, when `key` is empty) a user-pasted API key to
-/// %APPDATA%\Pane\<provider>.json.
+/// %APPDATA%\OpenMeter\<provider>.json.
 #[tauri::command]
 fn set_api_key(provider: String, key: String) -> Result<(), String> {
     if !matches!(
@@ -840,21 +841,14 @@ async fn codex_redeem_credit(credit_id: String) -> Result<String, String> {
     providers::codex::redeem_credit(&credit_id).await
 }
 
-/// Updater with the app version stamped into the endpoint by us. Tauri's
-/// `{{current_version}}` template arrives percent-encoded and never gets
-/// substituted in query strings, so 0.4.17 installs literally reported
-/// "?v={{current_version}}" — the version is now formatted in Rust.
-/// GitHub stays as the automatic fallback; the pubkey comes from config.
+/// OpenMeter reads its signed update manifest from this repository's latest
+/// GitHub release. The public verification key remains in tauri.conf.json.
 fn build_updater(
     app: &tauri::AppHandle,
 ) -> Result<tauri_plugin_updater::Updater, String> {
     use tauri_plugin_updater::UpdaterExt;
-    let version = app.package_info().version.to_string();
     let endpoints = vec![
-        format!("https://pane.jazii.dev/api/update?v={version}")
-            .parse()
-            .map_err(|e| format!("endpoint parse: {e}"))?,
-        "https://github.com/ItsJazii/pane/releases/latest/download/latest.json"
+        "https://github.com/aGamingGod1234/openmeter/releases/latest/download/latest.json"
             .parse()
             .map_err(|e| format!("endpoint parse: {e}"))?,
     ];
@@ -881,9 +875,8 @@ async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
         // The update the button promised is gone (yanked release, CDN
         // hiccup). Succeeding silently would strand the frontend in its
         // "Installing…" state — fail so the button can recover.
-        None => return Err("update no longer available — try again shortly".into()),
+        None => Err("update no longer available — try again shortly".into()),
     }
-    Ok(())
 }
 
 /// Popover-open update check: the footer asks on every tray click and
@@ -911,7 +904,7 @@ fn spawn_update_checker(app: &tauri::AppHandle) {
                         let _ = handle.emit("update-available", update.version.clone());
                     }
                     Ok(None) => {}
-                    Err(e) => eprintln!("[pane] update check: {e}"),
+                    Err(e) => eprintln!("[openmeter] update check: {e}"),
                 }
             }
             tokio::time::sleep(std::time::Duration::from_secs(4 * 3600)).await;
@@ -1023,12 +1016,12 @@ pub fn run() {
         ])
         .setup(|app| {
             spawn_update_checker(app.handle());
-            let quit = MenuItem::with_id(app, "quit", "Quit Pane", true, None::<&str>)?;
+            let quit = MenuItem::with_id(app, "quit", "Quit OpenMeter", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&quit])?;
 
             TrayIconBuilder::with_id("tray")
                 .icon(app.default_window_icon().unwrap().clone())
-                .tooltip("Pane")
+                .tooltip("OpenMeter")
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| {
@@ -1063,7 +1056,7 @@ pub fn run() {
                 .unwrap_or("")
                 .to_string();
             if let Err(e) = register_shortcut(app.handle(), &saved_shortcut) {
-                eprintln!("[pane] shortcut: {e}");
+                eprintln!("[openmeter] shortcut: {e}");
             }
 
             // Start with Windows is on by default (like the Mac app's

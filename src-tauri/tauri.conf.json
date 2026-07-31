@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Pane",
+  "productName": "OpenMeter",
   "version": "0.4.28",
-  "identifier": "com.jazii.pane",
+  "identifier": "com.agaminggod.openmeter",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -14,7 +14,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Pane",
+        "title": "OpenMeter",
         "dragDropEnabled": false,
         "width": 380,
         "height": 600,
@@ -33,20 +33,19 @@
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://pane.jazii.dev/api/update?v={{current_version}}",
-        "https://github.com/ItsJazii/pane/releases/latest/download/latest.json"
+        "https://github.com/aGamingGod1234/openmeter/releases/latest/download/latest.json"
       ],
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhDRUI5RUYzRkVBMzlCQ0QKUldUTm02UCs4NTdyalB4dHhyci8wb2dzb1FUQzJpaCt1VWc5dDJCaGpoWlNMTlNlWTF3Z0F4NEEK"
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDZEOENENjIyMDVDODM0MDcKUldRSE5NZ0ZJdGFNYlJCUEgra2N1a1hpNEk5L0lKdTNnbTdzTHRGOE5jRGQzSU1ES2ZRd3dvTCsK"
     }
   },
   "bundle": {
     "active": true,
     "targets": "all",
     "createUpdaterArtifacts": true,
-    "publisher": "Pane",
-    "copyright": "© 2026 Pane contributors (MIT)",
+    "publisher": "OpenMeter",
+    "copyright": "© 2026 OpenMeter contributors (MIT)",
     "shortDescription": "AI usage limits in your system tray",
-    "longDescription": "Pane shows how much of your session and weekly limits each AI tool has left, directly from the Windows system tray.",
+    "longDescription": "OpenMeter shows how much of your session and weekly limits each AI tool has left, directly from the Windows system tray.",
     "windows": {
       "nsis": {
         "installerIcon": "icons/icon.ico"

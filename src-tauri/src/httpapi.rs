@@ -104,11 +104,11 @@ pub fn start() {
         let server = match tiny_http::Server::http("127.0.0.1:6736") {
             Ok(s) => s,
             Err(e) => {
-                eprintln!("[pane] local API: port 6736 unavailable ({e}) — API off");
+                eprintln!("[openmeter] local API: port 6736 unavailable ({e}) — API off");
                 return;
             }
         };
-        eprintln!("[pane] local API: http://127.0.0.1:6736/v1/usage");
+        eprintln!("[openmeter] local API: http://127.0.0.1:6736/v1/usage");
         for request in server.incoming_requests() {
             let (status, body) = route(request.method(), request.url());
             let mut response = tiny_http::Response::from_string(body).with_status_code(status);

@@ -36,7 +36,7 @@ fn read_state_values() -> Result<(Option<String>, Option<String>), String> {
     let Some(db_path) = state_db_path() else {
         return Ok((None, None));
     };
-    let tmp = std::env::temp_dir().join(format!("openusage-cursor-{}.vscdb", std::process::id()));
+    let tmp = std::env::temp_dir().join(format!("openmeter-cursor-{}.vscdb", std::process::id()));
 
     let mut copy_err = String::new();
     for attempt in 0..3 {
@@ -154,7 +154,7 @@ pub async fn fetch_usage_csv() -> Option<String> {
         Err(_) => return stale(),
     };
     if !resp.status().is_success() {
-        eprintln!("[pane] cursor csv: HTTP {}", resp.status());
+        eprintln!("[openmeter] cursor csv: HTTP {}", resp.status());
         return stale();
     }
     let Ok(body) = resp.text().await else { return stale() };
@@ -214,7 +214,7 @@ async fn refresh_access_token(refresh: &str) -> Option<String> {
         .await
         .ok()?;
     if !resp.status().is_success() {
-        eprintln!("[pane] cursor token refresh: HTTP {}", resp.status());
+        eprintln!("[openmeter] cursor token refresh: HTTP {}", resp.status());
         return None;
     }
     let v: Value = resp.json().await.ok()?;

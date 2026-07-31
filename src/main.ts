@@ -21,8 +21,8 @@ import openrouterIcon from "./assets/providers/openrouter.svg?raw";
 // embed them — rasterized SVG images can't load external resources.
 // The bare ring suits the sidebar; the footer uses the full rounded
 // app icon, which stays legible at tiny sizes.
-import paneLogo from "./assets/pane-logo.png?inline";
-import paneIcon from "./assets/pane-icon.png?inline";
+import openMeterLogo from "./assets/openmeter-logo.png?inline";
+import openMeterIcon from "./assets/openmeter-icon.png?inline";
 import zaiIcon from "./assets/providers/zai.svg?raw";
 // The repo's changelog ships inside the bundle, so the "What's new" dialog
 // and the Settings changelog viewer read the exact file releases maintain.
@@ -112,18 +112,18 @@ function staleHelp(s: Snapshot): string {
   const lw = w.toLowerCase();
   const relogin =
     RELOGIN[s.id] ?? "add the API key again in Settings (or sign in with the tool once)";
-  let fix = "Pane keeps retrying automatically — nothing to do unless this persists.";
+  let fix = "OpenMeter keeps retrying automatically — nothing to do unless this persists.";
   if (/run `|open the/.test(lw)) {
     // The provider's own message already says what to do.
-    fix = "Pane recovers automatically once that's done.";
+    fix = "OpenMeter recovers automatically once that's done.";
   } else if (/http 40[13]|invalid_grant|expired|no refresh token|sign[- ]?in|log ?in|credentials/.test(lw)) {
-    fix = `Fix: ${relogin} — Pane picks it up on the next refresh.`;
+    fix = `Fix: ${relogin} — OpenMeter picks it up on the next refresh.`;
   } else if (/http 429|rate limit/.test(lw)) {
-    fix = "The vendor is rate-limiting; Pane waits exactly as long as it asked, then retries by itself.";
+    fix = "The vendor is rate-limiting; OpenMeter waits exactly as long as it asked, then retries by itself.";
   } else if (/http 5\d\d/.test(lw)) {
-    fix = "The vendor's API is having trouble; Pane retries automatically until it recovers.";
+    fix = "The vendor's API is having trouble; OpenMeter retries automatically until it recovers.";
   } else if (/error sending request|timed? ?out|connect|network|dns|proxy/.test(lw)) {
-    fix = "Pane couldn't reach the vendor — check your internet connection (or the proxy in Settings).";
+    fix = "OpenMeter couldn't reach the vendor — check your internet connection (or the proxy in Settings).";
   }
   return `${w}.\n${fix}\nShowing the last good data meanwhile.`;
 }
@@ -291,7 +291,7 @@ let config: Config = {
   pinned: null,
   trayProviders: [],
   pacingAlways: false,
-  telemetry: true,
+  telemetry: false,
   notifyAlmostOut: false,
   notifyCuttingClose: false,
   notifyWillRunOut: false,
@@ -1534,7 +1534,7 @@ async function shareCard(id: string): Promise<void> {
       // literal "]]>" inside CSS would end the section early, so split it.
       `<style><![CDATA[${css.split("]]>").join("]]]]><![CDATA[>")}]]></style>` +
       new XMLSerializer().serializeToString(clone) +
-      `<div id="snap-foot"><img src="${paneIcon}" alt="" /><span>Monitor Your AI Subscriptions with Pane</span></div>` +
+      `<div id="snap-foot"><img src="${openMeterIcon}" alt="" /><span>Monitor Your AI Subscriptions with OpenMeter</span></div>` +
       `</div></foreignObject></svg>`;
 
     const img = new Image();
@@ -2644,7 +2644,7 @@ async function initSettings(): Promise<void> {
 
 window.addEventListener("DOMContentLoaded", () => {
   const appLogo = document.querySelector<HTMLElement>("#app-logo")!;
-  appLogo.innerHTML = `<img src="${paneLogo}" alt="Pane" />`;
+  appLogo.innerHTML = `<img src="${openMeterLogo}" alt="OpenMeter" />`;
   // Party mode, the easy way: triple-click the logo. (The Konami code
   // still works, for the culture.)
   let logoClicks = 0;

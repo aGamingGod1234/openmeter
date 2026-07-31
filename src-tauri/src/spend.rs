@@ -690,7 +690,7 @@ fn minimax(extra: FileData) -> ProviderSpend {
 /// Which spend slice a Hermes row belongs to. Hermes (Nous Research's
 /// desktop agent) routes chats through whichever backend the user connected,
 /// so its ledger rows are filed under the provider that actually billed
-/// them; routes Pane has no slice for stay under Hermes's own name.
+/// them; routes OpenMeter has no slice for stay under Hermes's own name.
 fn hermes_bucket(billing_provider: &str) -> (&'static str, &'static str) {
     let lower = billing_provider.to_lowercase();
     if lower.contains("minimax") {
@@ -1173,7 +1173,7 @@ fn grok() -> ProviderSpend {
 /// OpenCode stores real per-message costs in its database — no pricing
 /// table needed.
 /// OpenCode's local log covers every provider routed through it. Gateway
-/// providers with their own Pane card (AihubMix) split into their own
+/// providers with their own OpenMeter card (AihubMix) split into their own
 /// spend slice — their dollars belong to that account, and the split gives
 /// the card its Today/Yesterday/30d rows and Usage Trend; everything else
 /// stays under OpenCode.

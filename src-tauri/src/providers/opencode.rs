@@ -47,7 +47,7 @@ fn with_db_copy<T>(f: impl FnOnce(&Path) -> Result<T, String>) -> Result<T, Stri
         return Err("opencode.db not found — has OpenCode been used on this PC?".into());
     }
     let n = COPY_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let tmp_base = std::env::temp_dir().join(format!("openusage-oc-{}-{n}", std::process::id()));
+    let tmp_base = std::env::temp_dir().join(format!("openmeter-oc-{}-{n}", std::process::id()));
     let tmp_db = tmp_base.with_extension("db");
     std::fs::copy(&db_path, &tmp_db).map_err(|e| format!("copy opencode.db: {e}"))?;
     for suffix in ["db-wal", "db-shm"] {

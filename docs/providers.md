@@ -1,4 +1,4 @@
-# Providers: exactly what Pane reads and calls
+# Providers: exactly what OpenMeter reads and calls
 
 One section per provider: which credentials are read from your PC, which
 endpoints they are sent to, and what comes back. Each provider's code
@@ -148,7 +148,7 @@ Ground rules that apply to every provider:
   `api.elevenlabs.io/v1/user/subscription`.
 - **Shows:** balances / character quota with reset pacing; Moonshot and
   DeepSeek add a "Credits used" percent bar metered against the highest
-  balance Pane has seen locally (top-ups raise it; feeds the Almost Out
+  balance OpenMeter has seen locally (top-ups raise it; feeds the Almost Out
   notification); Moonshot adds Today / Yesterday / 30-day spend, model
   breakdown, and the usage trend from Kimi Code sessions.
 

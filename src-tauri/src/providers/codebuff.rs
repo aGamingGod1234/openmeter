@@ -49,7 +49,7 @@ async fn fetch() -> Result<Snapshot, String> {
     let usage_req = http()
         .post("https://www.codebuff.com/api/v1/usage")
         .bearer_auth(&key)
-        .json(&serde_json::json!({ "fingerprintId": "pane-usage" }))
+        .json(&serde_json::json!({ "fingerprintId": "openmeter-usage" }))
         .send();
     let sub_req = http()
         .get("https://www.codebuff.com/api/user/subscription")

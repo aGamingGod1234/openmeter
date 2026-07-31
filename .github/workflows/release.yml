@@ -54,12 +54,12 @@ jobs:
           $hash = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash.ToLower()
           $manifest = @{
             version  = $ver
-            notes    = "https://github.com/ItsJazii/pane/blob/main/CHANGELOG.md"
+            notes    = "https://github.com/aGamingGod1234/openmeter/blob/main/CHANGELOG.md"
             pub_date = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
             sha256   = $hash
             platforms = @{ "windows-x86_64" = @{
               signature = $sig
-              url = "https://github.com/ItsJazii/pane/releases/download/$tag/$($exe.Name)"
+              url = "https://github.com/aGamingGod1234/openmeter/releases/download/$tag/$($exe.Name)"
             } }
           } | ConvertTo-Json -Depth 4
           [System.IO.File]::WriteAllText("latest.json", $manifest, (New-Object System.Text.UTF8Encoding($false)))
@@ -69,7 +69,7 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
-          name: pane-installer
+          name: openmeter-installer
           path: |
             src-tauri/target/release/bundle/nsis/*-setup.exe
             src-tauri/target/release/bundle/nsis/*-setup.exe.sig
@@ -81,7 +81,7 @@ jobs:
         run: |
           $exe = Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
           gh release create $env:GITHUB_REF_NAME `
-            --title "Pane $($env:GITHUB_REF_NAME.TrimStart('v'))" `
+            --title "OpenMeter $($env:GITHUB_REF_NAME.TrimStart('v'))" `
             --generate-notes `
             $exe.FullName "$($exe.FullName).sig" latest.json
         env:

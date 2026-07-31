@@ -8,7 +8,7 @@
 //!   3. models.dev (USD per million; exact-match only — fuzzy-matching a
 //!      reseller rate would fabricate dollars).
 //!
-//! Each source is cached at %APPDATA%\Pane\pricing\ and refreshed at
+//! Each source is cached at %APPDATA%\OpenMeter\pricing\ and refreshed at
 //! most every 24h (30-minute retry after a failure) with ETag revalidation.
 //! `lookup()` never touches the network; `ensure_fresh()` runs on the spend
 //! engine's blocking thread. The old hardcoded prices in spend.rs remain
@@ -445,15 +445,15 @@ pub fn ensure_fresh() {
                     state[source] = json!({ "etag": new_etag, "fetchedAt": now, "failedAt": 0 });
                     GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     UNPRICED_HINT.store(false, std::sync::atomic::Ordering::Relaxed);
-                    eprintln!("[pane] pricing: refreshed {source}");
+                    eprintln!("[openmeter] pricing: refreshed {source}");
                 }
                 Err(e) => {
-                    eprintln!("[pane] pricing: {source} parse failed ({e})");
+                    eprintln!("[openmeter] pricing: {source} parse failed ({e})");
                     state[source] = json!({ "etag": etag, "fetchedAt": fetched_at, "failedAt": now });
                 }
             },
             Err(e) => {
-                eprintln!("[pane] pricing: {source} fetch failed ({e})");
+                eprintln!("[openmeter] pricing: {source} fetch failed ({e})");
                 state[source] = json!({ "etag": etag, "fetchedAt": fetched_at, "failedAt": now });
             }
         }
