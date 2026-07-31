@@ -24,7 +24,7 @@ use std::path::PathBuf;
 /// One row inside a provider card, e.g. "Session ▓▓▓░░ 43% left · Resets in 2h".
 /// `resets_at` (epoch ms) + `period_ms` are the structured facts the pace
 /// engine needs; the UI formats countdowns and projections from them.
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct Metric {
     pub label: String,
     pub kind: String, // "progress" | "text"
@@ -71,9 +71,22 @@ impl Metric {
 /// Everything one provider reports back after a refresh. `stale` marks a
 /// snapshot that is actually the last good fetch, shown because the newest
 /// attempt failed transiently (`warning` carries that error).
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct Snapshot {
     pub id: String,
+    #[serde(default)]
+    pub provider_id: String,
+    #[serde(default = "default_account_id")]
+    pub account_id: String,
+    #[serde(default)]
+    pub card_id: String,
+    /// Opaque one-way credential identity used only to isolate local cache entries.
+    #[serde(default)]
+    pub credential_stamp: String,
+    #[serde(default)]
+    pub fetched_at: i64,
+    #[serde(default)]
+    pub expires_at: i64,
     pub name: String,
     pub plan: Option<String>,
     pub status: String, // "ok" | "no_credentials" | "error"
@@ -85,8 +98,15 @@ pub struct Snapshot {
 
 impl Snapshot {
     pub fn ok(id: &str, name: &str, plan: Option<String>, metrics: Vec<Metric>) -> Self {
+        let fetched_at = chrono::Utc::now().timestamp_millis();
         Self {
             id: id.into(),
+            provider_id: id.into(),
+            account_id: default_account_id(),
+            card_id: id.into(),
+            credential_stamp: String::new(),
+            fetched_at,
+            expires_at: fetched_at + 5 * 60 * 1000,
             name: name.into(),
             plan,
             status: "ok".into(),
@@ -98,8 +118,15 @@ impl Snapshot {
     }
 
     pub fn no_credentials(id: &str, name: &str, hint: &str) -> Self {
+        let fetched_at = chrono::Utc::now().timestamp_millis();
         Self {
             id: id.into(),
+            provider_id: id.into(),
+            account_id: default_account_id(),
+            card_id: id.into(),
+            credential_stamp: String::new(),
+            fetched_at,
+            expires_at: fetched_at,
             name: name.into(),
             plan: None,
             status: "no_credentials".into(),
@@ -111,8 +138,15 @@ impl Snapshot {
     }
 
     pub fn error(id: &str, name: &str, message: String) -> Self {
+        let fetched_at = chrono::Utc::now().timestamp_millis();
         Self {
             id: id.into(),
+            provider_id: id.into(),
+            account_id: default_account_id(),
+            card_id: id.into(),
+            credential_stamp: String::new(),
+            fetched_at,
+            expires_at: fetched_at,
             name: name.into(),
             plan: None,
             status: "error".into(),
@@ -122,6 +156,30 @@ impl Snapshot {
             warning: None,
         }
     }
+
+    pub fn with_cache_identity(
+        mut self,
+        account: &crate::accounts::AccountContext,
+        credential_stamp: &str,
+        fetched_at: i64,
+        expires_at: i64,
+    ) -> Self {
+        self.id = account.card_id.clone();
+        self.provider_id = account.provider_id.clone();
+        self.account_id = account.account_id.as_str().to_string();
+        self.card_id = account.card_id.clone();
+        self.name = account.display_name.clone();
+        self.credential_stamp = credential_stamp.to_string();
+        self.fetched_at = fetched_at;
+        self.expires_at = expires_at;
+        self
+    }
+}
+
+pub type ProviderSnapshot = Snapshot;
+
+fn default_account_id() -> String {
+    "default".to_string()
 }
 
 /// Optional outbound proxy from config.json `proxy: { enabled, url }`.

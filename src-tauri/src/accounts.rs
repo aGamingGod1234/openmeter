@@ -1,7 +1,6 @@
 use std::collections::HashSet;
-use std::io::{self, Write};
+use std::io;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
@@ -129,27 +128,10 @@ impl AccountRegistry {
 
     pub fn save(&self, path: &Path) -> Result<(), String> {
         self.validate()?;
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|error| format!("create {}: {error}", parent.display()))?;
-        }
         let bytes = serde_json::to_vec_pretty(self)
             .map_err(|error| format!("serialize account registry: {error}"))?;
-        let temp = temporary_path(path);
-        let result = (|| -> io::Result<()> {
-            let mut file = std::fs::OpenOptions::new()
-                .create_new(true)
-                .write(true)
-                .open(&temp)?;
-            file.write_all(&bytes)?;
-            file.write_all(b"\n")?;
-            file.sync_all()?;
-            atomic_replace(&temp, path)
-        })();
-        if result.is_err() {
-            let _ = std::fs::remove_file(&temp);
-        }
-        result.map_err(|error| format!("save {}: {error}", path.display()))
+        crate::platform::atomic_write(path, &bytes)
+            .map_err(|error| format!("save {}: {error}", path.display()))
     }
 
     fn validate(&self) -> Result<(), String> {
@@ -222,45 +204,4 @@ fn provider_display_name(provider_id: &str) -> String {
                 .unwrap_or_default()
         }
     }
-}
-
-fn temporary_path(path: &Path) -> PathBuf {
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_nanos())
-        .unwrap_or_default();
-    let name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("accounts.json");
-    path.with_file_name(format!(".{name}.{}.{}.tmp", std::process::id(), nonce))
-}
-
-#[cfg(windows)]
-fn atomic_replace(source: &Path, destination: &Path) -> io::Result<()> {
-    use std::os::windows::ffi::OsStrExt;
-    use windows::core::PCWSTR;
-    use windows::Win32::Storage::FileSystem::{
-        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
-    };
-
-    let source: Vec<u16> = source.as_os_str().encode_wide().chain(Some(0)).collect();
-    let destination: Vec<u16> = destination
-        .as_os_str()
-        .encode_wide()
-        .chain(Some(0))
-        .collect();
-    unsafe {
-        MoveFileExW(
-            PCWSTR(source.as_ptr()),
-            PCWSTR(destination.as_ptr()),
-            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
-        )
-        .map_err(io::Error::other)
-    }
-}
-
-#[cfg(not(windows))]
-fn atomic_replace(source: &Path, destination: &Path) -> io::Result<()> {
-    std::fs::rename(source, destination)
 }

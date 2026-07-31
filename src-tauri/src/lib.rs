@@ -1,9 +1,10 @@
 mod alerts;
 pub mod accounts;
+pub mod cache;
 mod httpapi;
 pub mod platform;
 mod pricing;
-mod providers;
+pub mod providers;
 mod spend;
 mod telemetry;
 
