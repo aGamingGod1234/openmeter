@@ -72,6 +72,20 @@ machine identifier, username, quota, spend, or provider data to the request.
   your disk. The logs never leave your machine; only the public price
   tables are downloaded.
 
+## Privacy mode and diagnostics
+
+Settings -> Privacy can exclude the OpenMeter window from Windows 11 screen
+capture using `WDA_EXCLUDEFROMCAPTURE`. The global `Ctrl+Shift+P` shortcut
+toggles it without opening the app. While enabled, tray percentages and the
+provider tray strip are hidden; providers remain enabled and continue to
+refresh locally.
+
+"Copy redacted diagnostics" exports only app/version, non-secret settings,
+provider/account IDs, source kinds, and enabled state. Credential values,
+credential paths, proxy details, usage amounts, spend, and free-form provider
+errors are excluded. The remaining text passes through the same token, email,
+and Windows-path sanitizer used for provider snapshots.
+
 ## The local HTTP API
 
 `http://127.0.0.1:6736/v1/usage` exists so your own scripts and widgets

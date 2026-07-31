@@ -11,6 +11,7 @@ import {
   renameAccount,
   type AccountRecord,
 } from "./accounts-ui";
+import { privacyStatus, privacyTrayValues } from "./privacy";
 
 // Injected by vite.config.ts at build time, e.g. "0707.1432".
 declare const __BUILD_STAMP__: string;
@@ -154,6 +155,7 @@ interface Config {
   density: "regular" | "compact";
   glassEffects: boolean;
   shortcut: string;
+  privacyMode: boolean;
   proxy: { enabled: boolean; url: string };
   showTotalSpend: boolean;
   welcomeDismissed: boolean;
@@ -282,6 +284,7 @@ let config: Config = {
   density: "regular",
   glassEffects: true,
   shortcut: "",
+  privacyMode: false,
   proxy: { enabled: false, url: "" },
   showTotalSpend: true,
   welcomeDismissed: false,
@@ -2250,7 +2253,7 @@ async function updateTrayStrip(): Promise<void> {
     entries.push({ id, logo, values, tooltip });
   }
   try {
-    await invoke("update_tray_strip", { entries });
+    await invoke("update_tray_strip", { entries: privacyTrayValues(config.privacyMode, entries) });
   } catch {
     // Tray strip is cosmetic — never let it break a refresh.
   }
@@ -2636,6 +2639,20 @@ async function initSettings(): Promise<void> {
     });
   }
 
+  const privacyMode = document.querySelector<HTMLInputElement>("#privacy-mode")!;
+  privacyMode.checked = config.privacyMode;
+  privacyMode.addEventListener("change", async () => {
+    try {
+      await invoke("set_privacy_mode", { enabled: privacyMode.checked });
+      config.privacyMode = privacyMode.checked;
+      document.querySelector("#status")!.textContent = privacyStatus(config.privacyMode);
+      await updateTrayStrip();
+    } catch (error) {
+      privacyMode.checked = !privacyMode.checked;
+      document.querySelector("#status")!.textContent = `Privacy mode failed: ${error}`;
+    }
+  });
+
   const pinned = document.querySelector<HTMLSelectElement>("#pinned")!;
   pinned.addEventListener("change", () => {
     const [provider, label] = pinned.value.split("::");
@@ -2750,6 +2767,13 @@ window.addEventListener("DOMContentLoaded", () => {
     void checkForUpdate();
   });
   document.querySelector("#refresh")!.addEventListener("click", () => void refresh(true));
+  void listen<boolean>("privacy-mode-changed", ({ payload }) => {
+    config.privacyMode = payload;
+    const toggle = document.querySelector<HTMLInputElement>("#privacy-mode");
+    if (toggle) toggle.checked = payload;
+    document.querySelector("#status")!.textContent = privacyStatus(payload);
+    void updateTrayStrip();
+  });
 
   const setSettings = (open: boolean) => {
     document.body.classList.toggle("settings-open", open);
@@ -2785,6 +2809,15 @@ window.addEventListener("DOMContentLoaded", () => {
   document.querySelector("#account-add")!.addEventListener("click", () => void addAccount());
   document.querySelector("#account-list")!.addEventListener("click", (event) => {
     void handleAccountClick(event.target as HTMLElement);
+  });
+  document.querySelector("#copy-diagnostics")!.addEventListener("click", () => {
+    void invoke("copy_diagnostics")
+      .then(() => {
+        document.querySelector("#status")!.textContent = "Redacted diagnostics copied";
+      })
+      .catch((error) => {
+        document.querySelector("#status")!.textContent = `Diagnostics failed: ${error}`;
+      });
   });
 
   const providersEl = document.querySelector<HTMLElement>("#providers")!;

@@ -121,6 +121,7 @@ fn config_with_defaults(mut cfg: Value) -> Value {
     obj.entry("density").or_insert(json!("compact"));
     obj.entry("glassEffects").or_insert(json!(true));
     obj.entry("shortcut").or_insert(json!(""));
+    obj.entry("privacyMode").or_insert(json!(false));
     obj.entry("proxy").or_insert(json!({ "enabled": false, "url": "" }));
     obj.entry("showTotalSpend").or_insert(json!(true));
     obj.entry("welcomeDismissed").or_insert(json!(false));
@@ -166,6 +167,7 @@ const CONFIG_KEYS: &[&str] = &[
     "density",
     "glassEffects",
     "shortcut",
+    "privacyMode",
     "proxy",
     "showTotalSpend",
     "welcomeDismissed",
@@ -352,6 +354,17 @@ fn update_tray(app: &tauri::AppHandle, snapshots: &[providers::Snapshot], cfg: &
     let Some(tray) = app.tray_by_id("tray") else {
         return;
     };
+    if cfg
+        .get("privacyMode")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        let _ = tray.set_tooltip(Some("OpenMeter - Privacy mode"));
+        if let Some(default) = app.default_window_icon() {
+            let _ = tray.set_icon(Some(default.clone()));
+        }
+        return;
+    }
 
     let mut tooltip = String::from("OpenMeter");
     for s in snapshots.iter().filter(|s| s.status == "ok").take(6) {
@@ -427,6 +440,15 @@ const STRIP_PROVIDER_IDS: [&str; 18] = [
 
 #[tauri::command]
 fn update_tray_strip(app: tauri::AppHandle, entries: Vec<StripEntry>) -> Result<(), String> {
+    let entries = if config_with_defaults(load_config())
+        .get("privacyMode")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        Vec::new()
+    } else {
+        entries
+    };
     let handle = app.clone();
     app.run_on_main_thread(move || {
         // Remove strip icons for providers no longer selected.
@@ -851,6 +873,18 @@ fn register_shortcut(app: &tauri::AppHandle, accel: &str) -> Result<(), String> 
     use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
     let gs = app.global_shortcut();
     let _ = gs.unregister_all();
+    let privacy: Shortcut = "Ctrl+Shift+P".parse().expect("static privacy shortcut");
+    gs.on_shortcut(privacy, |app, _shortcut, event| {
+        if event.state() == ShortcutState::Pressed {
+            let enabled = !config_with_defaults(load_config())
+                .get("privacyMode")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let _ = apply_privacy_mode(app, enabled);
+            let _ = app.emit("privacy-mode-changed", enabled);
+        }
+    })
+    .map_err(|e| format!("register privacy shortcut: {e}"))?;
     let accel = accel.trim();
     if accel.is_empty() {
         return Ok(());
@@ -872,6 +906,72 @@ fn register_shortcut(app: &tauri::AppHandle, accel: &str) -> Result<(), String> 
 #[tauri::command]
 fn set_shortcut(app: tauri::AppHandle, shortcut: String) -> Result<(), String> {
     register_shortcut(&app, &shortcut)
+}
+
+fn apply_privacy_mode(app: &tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    #[cfg(windows)]
+    if let Some(window) = app.get_webview_window("main") {
+        let hwnd = window
+            .hwnd()
+            .map_err(|error| format!("window handle: {error}"))?;
+        platform::set_capture_exclusion(hwnd, enabled)?;
+    }
+    let cfg = set_config(json!({ "privacyMode": enabled }))?;
+    update_tray(app, &[], &cfg);
+    if enabled {
+        let _ = update_tray_strip(app.clone(), Vec::new());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn set_privacy_mode(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    apply_privacy_mode(&app, enabled)
+}
+
+#[tauri::command]
+fn copy_diagnostics(app: tauri::AppHandle) -> Result<(), String> {
+    let cfg = config_with_defaults(load_config());
+    let registry = accounts::AccountRegistry::load(&account_registry_path()).unwrap_or_default();
+    let accounts: Vec<Value> = registry
+        .accounts()
+        .iter()
+        .map(|account| {
+            json!({
+                "providerId": account.provider_id,
+                "accountId": account.account_id.as_str(),
+                "cardId": account.card_id,
+                "enabled": account.enabled,
+                "source": match &account.source {
+                    accounts::AccountSource::DefaultHome => "default_home",
+                    accounts::AccountSource::Directory { .. } => "directory",
+                    accounts::AccountSource::Manual => "manual",
+                },
+            })
+        })
+        .collect();
+    let document = json!({
+        "app": "OpenMeter",
+        "version": app.package_info().version.to_string(),
+        "platform": "Windows 11",
+        "settings": {
+            "refreshMinutes": cfg.get("refreshMinutes"),
+            "disabled": cfg.get("disabled"),
+            "privacyMode": cfg.get("privacyMode"),
+            "telemetry": cfg.get("telemetry"),
+            "appearance": cfg.get("appearance"),
+            "density": cfg.get("density"),
+        },
+        "accounts": accounts,
+    });
+    let text = redaction::redact_text(
+        &serde_json::to_string_pretty(&document)
+            .map_err(|error| format!("serialize diagnostics: {error}"))?,
+    );
+    arboard::Clipboard::new()
+        .map_err(|error| format!("clipboard: {error}"))?
+        .set_text(text)
+        .map_err(|error| format!("copy diagnostics: {error}"))
 }
 
 /// Spends one banked Codex rate-limit reset credit. Irreversible — the
@@ -1053,6 +1153,8 @@ pub fn run() {
             open_link,
             copy_share_image,
             set_shortcut,
+            set_privacy_mode,
+            copy_diagnostics,
             codex_redeem_credit,
             install_update,
             check_update
@@ -1100,6 +1202,13 @@ pub fn run() {
                 .to_string();
             if let Err(e) = register_shortcut(app.handle(), &saved_shortcut) {
                 eprintln!("[openmeter] shortcut: {e}");
+            }
+            let privacy_mode = config_with_defaults(load_config())
+                .get("privacyMode")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            if let Err(error) = apply_privacy_mode(app.handle(), privacy_mode) {
+                eprintln!("[openmeter] privacy mode: {error}");
             }
 
             // Start with Windows is on by default (like the Mac app's

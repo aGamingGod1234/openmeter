@@ -3,6 +3,39 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+pub const WDA_NONE_VALUE: u32 = 0;
+pub const WDA_EXCLUDEFROMCAPTURE_VALUE: u32 = 0x11;
+
+pub fn capture_affinity(enabled: bool) -> u32 {
+    if enabled {
+        WDA_EXCLUDEFROMCAPTURE_VALUE
+    } else {
+        WDA_NONE_VALUE
+    }
+}
+
+pub fn privacy_tray_values(enabled: bool, values: &[u32]) -> Vec<u32> {
+    if enabled {
+        Vec::new()
+    } else {
+        values.to_vec()
+    }
+}
+
+#[cfg(windows)]
+pub fn set_capture_exclusion(
+    hwnd: windows::Win32::Foundation::HWND,
+    enabled: bool,
+) -> Result<(), String> {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SetWindowDisplayAffinity, WINDOW_DISPLAY_AFFINITY,
+    };
+    unsafe {
+        SetWindowDisplayAffinity(hwnd, WINDOW_DISPLAY_AFFINITY(capture_affinity(enabled)))
+            .map_err(|error| format!("set capture exclusion: {error}"))
+    }
+}
+
 pub fn config_dir_from(roaming_app_data: &Path) -> PathBuf {
     roaming_app_data.join("OpenMeter")
 }

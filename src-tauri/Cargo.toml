@@ -49,5 +49,5 @@ regex = "1"
 sha2 = "0.10"
 webview2-com = "0.38"
 windows-core = "0.61"
-windows = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Credentials", "Win32_Storage_FileSystem"] }
+windows = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Credentials", "Win32_Storage_FileSystem", "Win32_UI_WindowsAndMessaging"] }
 
