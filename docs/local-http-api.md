@@ -6,6 +6,8 @@ can read it.
 ```
 GET http://127.0.0.1:6736/v1/usage          # all enabled providers
 GET http://127.0.0.1:6736/v1/usage/:id      # one provider (e.g. /claude)
+GET http://127.0.0.1:6736/v1/limits         # normalized limit resources
+GET http://127.0.0.1:6736/v1/limits/:id     # one provider or account card
 ```
 
 Wire format (compatible with the macOS OpenUsage API):
@@ -26,6 +28,42 @@ Wire format (compatible with the macOS OpenUsage API):
     "periodDurationMs": 18000000
   }]
 }]
+```
+
+The limits endpoint uses the versioned `openusage.limits.v1` envelope. Provider
+cards are keyed by their stable card ID, so multiple accounts from the same
+provider remain distinct. UI-only text rows are omitted; progress rows become
+normalized resources with usage, remaining capacity, utilization, reset time,
+and window length where available.
+
+```json
+{
+  "schema": "openusage.limits.v1",
+  "generatedAt": "2026-07-08T01:30:00.000Z",
+  "providers": {
+    "codex--work": {
+      "providerId": "codex",
+      "accountId": "work",
+      "displayName": "Codex",
+      "plan": "Plus",
+      "fetchedAt": "2026-07-08T01:30:00.000Z",
+      "expiresAt": "2026-07-08T01:35:00.000Z",
+      "stale": false,
+      "resources": {
+        "weekly": {
+          "kind": "consumption",
+          "unit": "percent",
+          "used": 42.0,
+          "limit": 100.0,
+          "remaining": 58.0,
+          "utilization": 0.42,
+          "windowSeconds": 604800.0
+        }
+      }
+    }
+  },
+  "errors": []
+}
 ```
 
 ## Security posture
