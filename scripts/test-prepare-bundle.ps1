@@ -2,12 +2,17 @@ $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $configPath = Join-Path $projectRoot 'src-tauri\tauri.conf.json'
 $overlayPath = Join-Path $projectRoot 'src-tauri\tauri.bundle.conf.json'
+$cargoPath = Join-Path $projectRoot 'src-tauri\Cargo.toml'
 $workflowPath = Join-Path $projectRoot '.github\workflows\release.yml'
 $builder = Join-Path $PSScriptRoot 'prepare-bundle.ps1'
 
 $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
 if ($config.bundle.resources) {
     throw 'Release-only resources must not break ordinary Cargo builds.'
+}
+$cargo = Get-Content -LiteralPath $cargoPath -Raw
+if ($cargo -notmatch '(?m)^default-run\s*=\s*"openmeter-tray"\s*$') {
+    throw 'Cargo must explicitly select the tray binary as Tauri main.'
 }
 $overlay = Get-Content -LiteralPath $overlayPath -Raw | ConvertFrom-Json
 $resources = $overlay.bundle.resources
