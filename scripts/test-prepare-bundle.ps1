@@ -20,11 +20,11 @@ if ($resources.'windows/path.ps1' -ne 'path.ps1') {
 if ($overlay.bundle.windows.nsis.installerHooks -ne 'windows/hooks.nsh') {
     throw 'The NSIS hook must resolve relative to src-tauri.'
 }
-if ($config.build.beforeBuildCommand -ne 'npm --prefix .. run build') {
-    throw 'The frontend build must work while Tauri runs from src-tauri.'
+if ($config.build.beforeBuildCommand -ne 'npm run build') {
+    throw 'Tauri already runs the frontend build from the frontend root.'
 }
-if ($config.build.beforeDevCommand -ne 'npm --prefix .. run dev') {
-    throw 'The frontend dev server must work while Tauri runs from src-tauri.'
+if ($config.build.beforeDevCommand -ne 'npm run dev') {
+    throw 'Tauri already runs the frontend dev server from the frontend root.'
 }
 
 $workflow = Get-Content -LiteralPath $workflowPath -Raw

@@ -5,9 +5,9 @@
   "version": "0.5.0",
   "identifier": "com.agaminggod.openmeter",
   "build": {
-    "beforeDevCommand": "npm --prefix .. run dev",
+    "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm --prefix .. run build",
+    "beforeBuildCommand": "npm run build",
     "frontendDist": "../dist"
   },
   "app": {
