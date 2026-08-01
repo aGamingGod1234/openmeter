@@ -12,11 +12,11 @@ if ($config.bundle.resources) {
 $overlay = Get-Content -LiteralPath $overlayPath -Raw | ConvertFrom-Json
 $resources = $overlay.bundle.resources
 if (-not $resources) { throw 'Bundle resources must live in the release overlay.' }
-if ($resources.'bundle-inputs/openmeter.exe' -ne 'openmeter.exe') {
-    throw 'The CLI resource must use the shared staging-relative path.'
+if ($resources.'bundle-inputs/openmeter.exe' -ne 'resources/openmeter.exe') {
+    throw 'The CLI must install under the resources directory expected by the PATH hook.'
 }
-if ($resources.'bundle-inputs/path.ps1' -ne 'path.ps1') {
-    throw 'The PATH helper must use the shared staging-relative path.'
+if ($resources.'bundle-inputs/path.ps1' -ne 'resources/path.ps1') {
+    throw 'The PATH helper must install under the resources directory.'
 }
 if ($overlay.bundle.windows.nsis.installerHooks -ne 'bundle-inputs/hooks.nsh') {
     throw 'The NSIS hook must use the shared staging-relative path.'
