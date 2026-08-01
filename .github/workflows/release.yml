@@ -46,6 +46,18 @@ jobs:
       - name: Build bundled CLI
         run: cargo build --manifest-path src-tauri/Cargo.toml --release --bin openmeter
 
+      - name: Verify bundle inputs
+        shell: pwsh
+        run: |
+          $config = Get-Content src-tauri/tauri.bundle.conf.json -Raw | ConvertFrom-Json
+          $sources = $config.bundle.resources.PSObject.Properties.Name
+          $sources += $config.bundle.windows.nsis.installerHooks
+          foreach ($source in $sources) {
+            if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+              throw "Bundle input does not exist from repository root: $source"
+            }
+          }
+
       - name: Build (signed)
         run: npm run tauri build -- --bundles nsis --config src-tauri/tauri.bundle.conf.json
         env:
