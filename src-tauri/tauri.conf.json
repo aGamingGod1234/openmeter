@@ -5,9 +5,9 @@
   "version": "0.5.0",
   "identifier": "com.agaminggod.openmeter",
   "build": {
-    "beforeDevCommand": "npm run dev",
+    "beforeDevCommand": "npm --prefix .. run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run build",
+    "beforeBuildCommand": "npm --prefix .. run build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -47,10 +47,15 @@
     "copyright": "© 2026 OpenMeter contributors (MIT)",
     "shortDescription": "AI usage limits in your system tray",
     "longDescription": "OpenMeter shows how much of your session and weekly limits each AI tool has left, directly from the Windows system tray.",
+    "resources": {
+      "target/release/openmeter.exe": "openmeter.exe",
+      "windows/path.ps1": "path.ps1"
+    },
     "windows": {
       "nsis": {
         "installerIcon": "icons/icon.ico",
-        "installMode": "currentUser"
+        "installMode": "currentUser",
+        "installerHooks": "windows/hooks.nsh"
       }
     },
     "icon": [

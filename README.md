@@ -74,10 +74,12 @@ Tools, WebView2 (bundled with Windows 11).
 git clone https://github.com/aGamingGod1234/openmeter
 cd openmeter
 npm install
-npm run tauri dev     # run with hot reload
+cd src-tauri
+..\node_modules\.bin\tauri.cmd dev     # run with hot reload
+cd ..
 cargo build --manifest-path src-tauri/Cargo.toml --release --bin openmeter
-.\scripts\prepare-bundle.ps1
-npm run tauri build -- --bundles nsis --config src-tauri/tauri.bundle.generated.conf.json
+cd src-tauri
+..\node_modules\.bin\tauri.cmd build --bundles nsis
                        # installer lands in src-tauri/target/release/bundle
 ```
 
