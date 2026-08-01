@@ -79,7 +79,7 @@ cd src-tauri
 cd ..
 cargo build --manifest-path src-tauri/Cargo.toml --release --bin openmeter
 cd src-tauri
-..\node_modules\.bin\tauri.cmd build --bundles nsis
+..\node_modules\.bin\tauri.cmd build --bundles nsis --config tauri.bundle.conf.json
                        # installer lands in src-tauri/target/release/bundle
 ```
 
