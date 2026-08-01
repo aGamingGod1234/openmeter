@@ -50,6 +50,10 @@ jobs:
       - name: Build bundled CLI
         run: cargo build --manifest-path src-tauri/Cargo.toml --release --bin openmeter
 
+      - name: Stage bundle inputs
+        shell: pwsh
+        run: .\scripts\prepare-bundle.ps1
+
       - name: Build (signed)
         working-directory: src-tauri
         run: ..\node_modules\.bin\tauri.cmd build --bundles nsis --config tauri.bundle.conf.json
