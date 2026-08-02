@@ -46,3 +46,26 @@ fn provider_runtime_reads_credentials_from_the_launch_snapshot() {
         .any(|source| std::path::Path::new(source) == credential));
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn claude_and_codex_refresh_paths_use_the_launch_snapshot() {
+    let mut variables = BTreeMap::new();
+    variables.insert(
+        "CLAUDE_CONFIG_DIR".to_string(),
+        OsString::from(r"C:\Accounts\claude-work"),
+    );
+    variables.insert(
+        "CODEX_HOME".to_string(),
+        OsString::from(r"C:\Accounts\codex-work"),
+    );
+    let snapshot = EnvironmentSnapshot::from_values(PathBuf::from(r"C:\Users\test"), variables);
+
+    assert_eq!(
+        providers::claude::credentials_path(&snapshot),
+        PathBuf::from(r"C:\Accounts\claude-work\.credentials.json")
+    );
+    assert_eq!(
+        providers::codex::auth_path(&snapshot),
+        PathBuf::from(r"C:\Accounts\codex-work\auth.json")
+    );
+}
