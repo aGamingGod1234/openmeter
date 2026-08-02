@@ -25,6 +25,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use crate::accounts::{AccountContext, AccountSource};
+use crate::environment::EnvironmentSnapshot;
 
 pub type ProviderFetchFuture = Pin<Box<dyn Future<Output = ProviderSnapshot> + Send + 'static>>;
 
@@ -258,10 +259,17 @@ pub fn account_credential_stamp(account: &AccountContext) -> String {
 }
 
 pub fn account_credential_material(account: &AccountContext) -> CredentialMaterial {
+    account_credential_material_with_environment(account, &EnvironmentSnapshot::capture())
+}
+
+fn account_credential_material_with_environment(
+    account: &AccountContext,
+    environment: &EnvironmentSnapshot,
+) -> CredentialMaterial {
     let mut material = Vec::new();
     let mut sources = Vec::new();
     material.extend_from_slice(account.card_id.as_bytes());
-    for path in credential_paths(account) {
+    for path in credential_paths(account, environment) {
         if let Ok(bytes) = std::fs::read(&path) {
             sources.push(path.to_string_lossy().to_string());
             material.extend_from_slice(path.to_string_lossy().as_bytes());
@@ -269,10 +277,10 @@ pub fn account_credential_material(account: &AccountContext) -> CredentialMateri
         }
     }
     for variable in credential_environment_variables(&account.provider_id) {
-        if let Ok(value) = std::env::var(variable) {
+        if let Some(value) = environment.var(variable) {
             sources.push(format!("env:{variable}"));
             material.extend_from_slice(variable.as_bytes());
-            material.extend_from_slice(value.as_bytes());
+            material.extend_from_slice(value.to_string_lossy().as_bytes());
         }
     }
     for target in credential_manager_targets(&account.provider_id) {
@@ -296,13 +304,26 @@ pub fn account_credential_material(account: &AccountContext) -> CredentialMateri
 }
 
 pub fn runtime_for(provider_id: &str) -> Option<ProviderRuntime> {
+    runtime_for_with_environment(provider_id, EnvironmentSnapshot::capture())
+}
+
+pub fn runtime_for_with_environment(
+    provider_id: &str,
+    environment: EnvironmentSnapshot,
+) -> Option<ProviderRuntime> {
     let descriptor = provider_catalog()
         .iter()
         .find(|descriptor| descriptor.id == provider_id)?;
     let id = descriptor.id;
+    let environment = Arc::new(environment);
     Some(ProviderRuntime::new(
         id,
-        |account| Ok(account_credential_material(account)),
+        move |account| {
+            Ok(account_credential_material_with_environment(
+                account,
+                &environment,
+            ))
+        },
         move |account, _credential| account_snapshot(id, account.clone()),
     ))
 }
@@ -352,7 +373,7 @@ fn legacy_snapshot(provider_id: &'static str) -> ProviderFetchFuture {
     }
 }
 
-fn credential_paths(account: &AccountContext) -> Vec<PathBuf> {
+fn credential_paths(account: &AccountContext, environment: &EnvironmentSnapshot) -> Vec<PathBuf> {
     let relative: &[&str] = match account.provider_id.as_str() {
         "claude" => &[".claude/.credentials.json", ".credentials.json"],
         "codex" => &[".codex/auth.json", "auth.json"],
@@ -387,10 +408,11 @@ fn credential_paths(account: &AccountContext) -> Vec<PathBuf> {
             config_dir().join(format!("{}.json", account.provider_id)),
         ],
         AccountSource::DefaultHome => {
-            let home = dirs::home_dir().unwrap_or_default();
-            let appdata = std::env::var("APPDATA")
+            let home = environment.home_dir().to_path_buf();
+            let appdata = environment
+                .var("APPDATA")
                 .map(PathBuf::from)
-                .unwrap_or_else(|_| home.clone());
+                .unwrap_or_else(|| home.clone());
             relative
                 .iter()
                 .flat_map(|item| [home.join(item), appdata.join(item)])
