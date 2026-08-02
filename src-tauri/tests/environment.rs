@@ -2,7 +2,9 @@ use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::PathBuf;
 
-use openmeter_lib::environment::EnvironmentSnapshot;
+use openmeter_lib::environment::{
+    install_launch_environment, launch_environment, EnvironmentSnapshot,
+};
 use openmeter_lib::{accounts::AccountContext, providers};
 
 #[test]
@@ -68,4 +70,18 @@ fn claude_and_codex_refresh_paths_use_the_launch_snapshot() {
         providers::codex::auth_path(&snapshot),
         PathBuf::from(r"C:\Accounts\codex-work\auth.json")
     );
+}
+
+#[test]
+fn installed_launch_environment_is_process_stable() {
+    let snapshot =
+        EnvironmentSnapshot::from_values(PathBuf::from(r"C:\StableHome"), BTreeMap::new());
+
+    install_launch_environment(snapshot).unwrap();
+
+    assert_eq!(
+        launch_environment().home_dir(),
+        PathBuf::from(r"C:\StableHome")
+    );
+    assert!(install_launch_environment(EnvironmentSnapshot::capture()).is_err());
 }
