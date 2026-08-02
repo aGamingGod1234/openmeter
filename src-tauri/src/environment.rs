@@ -1,11 +1,24 @@
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
+
+static LAUNCH_ENVIRONMENT: OnceLock<EnvironmentSnapshot> = OnceLock::new();
 
 #[derive(Debug, Clone)]
 pub struct EnvironmentSnapshot {
     home: PathBuf,
     variables: BTreeMap<String, OsString>,
+}
+
+pub fn install_launch_environment(
+    environment: EnvironmentSnapshot,
+) -> Result<(), EnvironmentSnapshot> {
+    LAUNCH_ENVIRONMENT.set(environment)
+}
+
+pub fn launch_environment() -> &'static EnvironmentSnapshot {
+    LAUNCH_ENVIRONMENT.get_or_init(EnvironmentSnapshot::capture)
 }
 
 impl EnvironmentSnapshot {

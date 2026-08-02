@@ -30,14 +30,14 @@ fn jwt_claims(token: &str) -> Option<Value> {
 }
 
 pub async fn snapshot() -> Snapshot {
-    match fetch(auth_path(&EnvironmentSnapshot::capture())).await {
+    match fetch(auth_path(crate::environment::launch_environment())).await {
         Ok(s) => s,
         Err(e) => Snapshot::error(ID, NAME, e),
     }
 }
 
 pub async fn snapshot_for(account: &AccountContext) -> Snapshot {
-    snapshot_for_with_environment(account, &EnvironmentSnapshot::capture()).await
+    snapshot_for_with_environment(account, crate::environment::launch_environment()).await
 }
 
 pub async fn snapshot_for_with_environment(
@@ -71,7 +71,7 @@ struct Access {
 /// Loads (and if needed refreshes + writes back) the Codex OAuth access
 /// token. Shared by the usage fetch and the reset-credit redeem command.
 async fn load_access() -> Result<Access, String> {
-    load_access_from(&auth_path(&EnvironmentSnapshot::capture())).await
+    load_access_from(&auth_path(crate::environment::launch_environment())).await
 }
 
 async fn load_access_from(path: &std::path::Path) -> Result<Access, String> {

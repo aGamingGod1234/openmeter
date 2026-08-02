@@ -259,7 +259,7 @@ pub fn account_credential_stamp(account: &AccountContext) -> String {
 }
 
 pub fn account_credential_material(account: &AccountContext) -> CredentialMaterial {
-    account_credential_material_with_environment(account, &EnvironmentSnapshot::capture())
+    account_credential_material_with_environment(account, crate::environment::launch_environment())
 }
 
 fn account_credential_material_with_environment(
@@ -304,7 +304,10 @@ fn account_credential_material_with_environment(
 }
 
 pub fn runtime_for(provider_id: &str) -> Option<ProviderRuntime> {
-    runtime_for_with_environment(provider_id, EnvironmentSnapshot::capture())
+    runtime_for_with_environment(
+        provider_id,
+        crate::environment::launch_environment().clone(),
+    )
 }
 
 pub fn runtime_for_with_environment(

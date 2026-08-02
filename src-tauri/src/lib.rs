@@ -933,6 +933,7 @@ fn toggle_popover(app: &tauri::AppHandle, click: tauri::PhysicalPosition<f64>) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let _ = environment::install_launch_environment(environment::EnvironmentSnapshot::capture());
     tauri::Builder::default()
         // Second launches just poke the existing instance's popover open
         // instead of spawning a duplicate tray icon (Mac parity).

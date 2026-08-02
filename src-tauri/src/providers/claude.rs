@@ -19,14 +19,14 @@ pub fn credentials_path(environment: &EnvironmentSnapshot) -> PathBuf {
 }
 
 pub async fn snapshot() -> Snapshot {
-    match fetch(credentials_path(&EnvironmentSnapshot::capture())).await {
+    match fetch(credentials_path(crate::environment::launch_environment())).await {
         Ok(s) => s,
         Err(e) => Snapshot::error(ID, NAME, e),
     }
 }
 
 pub async fn snapshot_for(account: &AccountContext) -> Snapshot {
-    snapshot_for_with_environment(account, &EnvironmentSnapshot::capture()).await
+    snapshot_for_with_environment(account, crate::environment::launch_environment()).await
 }
 
 pub async fn snapshot_for_with_environment(
