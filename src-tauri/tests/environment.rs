@@ -40,6 +40,9 @@ fn provider_runtime_reads_credentials_from_the_launch_snapshot() {
 
     let probe = runtime.probe(&account).unwrap();
 
-    assert!(probe.source_id.ends_with(r".claude\.credentials.json"));
+    assert!(probe
+        .source_id
+        .split(';')
+        .any(|source| std::path::Path::new(source) == credential));
     std::fs::remove_dir_all(root).unwrap();
 }
