@@ -1,6 +1,36 @@
 use std::path::PathBuf;
 
-use openmeter_lib::accounts::{AccountContext, AccountRegistry};
+use openmeter_lib::accounts::{AccountContext, AccountRegistry, AccountSource};
+
+#[test]
+fn sources_with_the_same_identity_merge_into_one_stable_account() {
+    let mut registry = AccountRegistry::from_accounts(vec![
+        AccountContext::identified(
+            "claude",
+            "organization:acme",
+            Some("Work"),
+            AccountSource::default_home("claude-home"),
+        )
+        .expect("valid discovered account"),
+    ])
+    .unwrap();
+
+    registry
+        .attach_source(
+            "organization:acme",
+            AccountSource::directory("claude-work", PathBuf::from(r"D:\AI\claude-work"))
+                .unwrap(),
+        )
+        .unwrap();
+
+    assert_eq!(registry.accounts().len(), 1);
+    let account = &registry.accounts()[0];
+    assert_eq!(account.card_id, "claude");
+    assert_eq!(account.identity_key.as_deref(), Some("organization:acme"));
+    assert_eq!(account.sources.len(), 2);
+    assert!(account.sources[0].holds_default_source);
+    assert!(!account.sources[1].holds_default_source);
+}
 
 #[test]
 fn default_and_named_accounts_have_stable_card_ids() {
