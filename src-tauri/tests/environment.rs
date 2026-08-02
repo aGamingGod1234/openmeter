@@ -12,10 +12,7 @@ fn uses_the_values_captured_at_launch() {
         OsString::from(r"C:\Claude\work"),
     );
 
-    let snapshot = EnvironmentSnapshot::from_values(
-        PathBuf::from(r"C:\Users\test"),
-        variables,
-    );
+    let snapshot = EnvironmentSnapshot::from_values(PathBuf::from(r"C:\Users\test"), variables);
 
     assert_eq!(
         snapshot.var("CLAUDE_CONFIG_DIR"),
