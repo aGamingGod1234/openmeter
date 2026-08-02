@@ -1,5 +1,6 @@
 use super::{http, Metric, Snapshot};
 use crate::accounts::{AccountContext, AccountSource};
+use crate::environment::EnvironmentSnapshot;
 use base64::Engine;
 use chrono::Utc;
 use serde_json::{json, Value};
@@ -10,10 +11,11 @@ const CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 const ID: &str = "codex";
 const NAME: &str = "Codex";
 
-fn auth_path() -> PathBuf {
-    let home = std::env::var("CODEX_HOME")
+pub fn auth_path(environment: &EnvironmentSnapshot) -> PathBuf {
+    let home = environment
+        .var("CODEX_HOME")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| dirs::home_dir().unwrap_or_default().join(".codex"));
+        .unwrap_or_else(|| environment.home_dir().join(".codex"));
     home.join("auth.json")
 }
 
@@ -28,15 +30,22 @@ fn jwt_claims(token: &str) -> Option<Value> {
 }
 
 pub async fn snapshot() -> Snapshot {
-    match fetch(auth_path()).await {
+    match fetch(auth_path(&EnvironmentSnapshot::capture())).await {
         Ok(s) => s,
         Err(e) => Snapshot::error(ID, NAME, e),
     }
 }
 
 pub async fn snapshot_for(account: &AccountContext) -> Snapshot {
+    snapshot_for_with_environment(account, &EnvironmentSnapshot::capture()).await
+}
+
+pub async fn snapshot_for_with_environment(
+    account: &AccountContext,
+    environment: &EnvironmentSnapshot,
+) -> Snapshot {
     let path = match &account.source {
-        AccountSource::DefaultHome => auth_path(),
+        AccountSource::DefaultHome => auth_path(environment),
         AccountSource::Directory { path } if path.is_file() => path.clone(),
         AccountSource::Directory { path } => path.join("auth.json"),
         AccountSource::Manual => {
@@ -62,7 +71,7 @@ struct Access {
 /// Loads (and if needed refreshes + writes back) the Codex OAuth access
 /// token. Shared by the usage fetch and the reset-credit redeem command.
 async fn load_access() -> Result<Access, String> {
-    load_access_from(&auth_path()).await
+    load_access_from(&auth_path(&EnvironmentSnapshot::capture())).await
 }
 
 async fn load_access_from(path: &std::path::Path) -> Result<Access, String> {

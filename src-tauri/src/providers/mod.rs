@@ -316,6 +316,7 @@ pub fn runtime_for_with_environment(
         .find(|descriptor| descriptor.id == provider_id)?;
     let id = descriptor.id;
     let environment = Arc::new(environment);
+    let refresh_environment = Arc::clone(&environment);
     Some(ProviderRuntime::new(
         id,
         move |account| {
@@ -324,14 +325,28 @@ pub fn runtime_for_with_environment(
                 &environment,
             ))
         },
-        move |account, _credential| account_snapshot(id, account.clone()),
+        move |account, _credential| {
+            account_snapshot(id, account.clone(), Arc::clone(&refresh_environment))
+        },
     ))
 }
 
-fn account_snapshot(provider_id: &'static str, account: AccountContext) -> ProviderFetchFuture {
+fn account_snapshot(
+    provider_id: &'static str,
+    account: AccountContext,
+    environment: Arc<EnvironmentSnapshot>,
+) -> ProviderFetchFuture {
     match provider_id {
-        "claude" => Box::pin(async move { claude::snapshot_for(&account).await }),
-        "codex" => Box::pin(async move { codex::snapshot_for(&account).await }),
+        "claude" => {
+            Box::pin(
+                async move { claude::snapshot_for_with_environment(&account, &environment).await },
+            )
+        }
+        "codex" => {
+            Box::pin(
+                async move { codex::snapshot_for_with_environment(&account, &environment).await },
+            )
+        }
         _ if matches!(account.source, AccountSource::DefaultHome) => legacy_snapshot(provider_id),
         _ => Box::pin(async move {
             ProviderSnapshot::no_credentials(

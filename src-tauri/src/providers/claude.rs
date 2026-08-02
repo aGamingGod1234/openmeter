@@ -1,5 +1,6 @@
 use super::{http, Metric, Snapshot};
 use crate::accounts::{AccountContext, AccountSource};
+use crate::environment::EnvironmentSnapshot;
 use chrono::{DateTime, Utc};
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -9,23 +10,31 @@ const CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 const ID: &str = "claude";
 const NAME: &str = "Claude";
 
-fn creds_path() -> PathBuf {
-    let config_dir = std::env::var("CLAUDE_CONFIG_DIR")
+pub fn credentials_path(environment: &EnvironmentSnapshot) -> PathBuf {
+    let config_dir = environment
+        .var("CLAUDE_CONFIG_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| dirs::home_dir().unwrap_or_default().join(".claude"));
+        .unwrap_or_else(|| environment.home_dir().join(".claude"));
     config_dir.join(".credentials.json")
 }
 
 pub async fn snapshot() -> Snapshot {
-    match fetch(creds_path()).await {
+    match fetch(credentials_path(&EnvironmentSnapshot::capture())).await {
         Ok(s) => s,
         Err(e) => Snapshot::error(ID, NAME, e),
     }
 }
 
 pub async fn snapshot_for(account: &AccountContext) -> Snapshot {
+    snapshot_for_with_environment(account, &EnvironmentSnapshot::capture()).await
+}
+
+pub async fn snapshot_for_with_environment(
+    account: &AccountContext,
+    environment: &EnvironmentSnapshot,
+) -> Snapshot {
     let path = match &account.source {
-        AccountSource::DefaultHome => creds_path(),
+        AccountSource::DefaultHome => credentials_path(environment),
         AccountSource::Directory { path } if path.is_file() => path.clone(),
         AccountSource::Directory { path } => path.join(".credentials.json"),
         AccountSource::Manual => {
