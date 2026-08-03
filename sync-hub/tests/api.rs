@@ -2,7 +2,7 @@ use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
 use http_body_util::BodyExt;
 use openmeter_sync_hub::{router, Hub, Store};
-use openmeter_sync_protocol::{EncryptedEnvelope, EnvelopeMeta};
+use openmeter_sync_protocol::{EncryptedEnvelope, EnvelopeMeta, MAX_ENVELOPE_BYTES};
 use serde_json::{json, Value};
 use tower::ServiceExt;
 
@@ -70,6 +70,33 @@ async fn oversized_body_is_rejected_before_json_parsing() {
     cleanup(path);
 }
 
+#[tokio::test]
+async fn maximum_valid_ciphertext_fits_the_wire_body_limit() {
+    let db_path = temp_db();
+    let hub = Hub::new(Store::open(&db_path).unwrap(), [3; 32]);
+    let token = hub.create_enrollment(now_ms()).unwrap();
+    let app = router(hub);
+    let enrolled = send_json(&app, "/v1/enroll", None, json!({"token": token})).await;
+    let device_id = enrolled.1["device_id"].as_str().unwrap();
+    let credential = enrolled.1["credential"].as_str().unwrap();
+    let envelope = EncryptedEnvelope {
+        meta: EnvelopeMeta::new(device_id, 1, 1_800_000_000_000).unwrap(),
+        nonce: vec![7; 24],
+        ciphertext: vec![255; MAX_ENVELOPE_BYTES],
+    };
+
+    let uploaded = send_json(
+        &app,
+        &format!("/v1/devices/{device_id}/envelope"),
+        Some(credential),
+        serde_json::to_value(envelope).unwrap(),
+    )
+    .await;
+
+    assert_eq!(uploaded.0, StatusCode::NO_CONTENT);
+    cleanup(db_path);
+}
+
 async fn send_json(
     app: &axum::Router,
     uri: &str,
@@ -97,7 +124,8 @@ async fn send_json(
     let value = if bytes.is_empty() {
         Value::Null
     } else {
-        serde_json::from_slice(&bytes).unwrap()
+        serde_json::from_slice(&bytes)
+            .unwrap_or_else(|_| Value::String(String::from_utf8_lossy(&bytes).into_owned()))
     };
     (status, value)
 }
