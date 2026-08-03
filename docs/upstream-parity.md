@@ -24,3 +24,6 @@ When either upstream changes, classify the change as provider behavior,
 contract/account behavior, or platform UI. Port it through the corresponding
 runtime boundary and extend the existing fixture or contract tests before
 changing the Windows shell.
+
+The CI-enforced capability-to-test mapping is maintained in
+[`docs/parity-matrix.md`](parity-matrix.md).

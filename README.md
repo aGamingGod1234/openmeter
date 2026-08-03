@@ -28,6 +28,7 @@ OpenMeter puts all of them in one place, in your system tray, refreshed every
 few minutes, with pace warnings *before* you hit the wall. It is a Windows 11
 application derived from [Pane](https://github.com/ItsJazii/pane) and designed
 for feature parity with [OpenUsage for macOS](https://github.com/robinebers/openusage).
+The continuously checked capability map is in [docs/parity-matrix.md](docs/parity-matrix.md).
 
 ## Install
 

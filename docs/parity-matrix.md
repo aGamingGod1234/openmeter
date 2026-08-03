@@ -1,0 +1,22 @@
+# OpenUsage parity matrix
+
+Baseline: OpenUsage `9d2bf09`, with Pane `272a6ae` retained for the mature Windows tray shell and its extra providers. “Complete” means the named automated check exists and is run by CI; platform-only behavior is additionally covered by installed-app and Mini PC live checks.
+
+| Capability | Upstream behavior | Windows implementation | CI/live verification | Windows equivalence | Status |
+|---|---|---|---|---|---|
+| accounts | Stable account identity, naming, and isolation | `src-tauri/src/accounts.rs`, `src/accounts-ui.ts` | `src-tauri/tests/accounts.rs`, `src-tauri/tests/provider_accounts.rs`, `tests/accounts-ui.test.ts` | Registry-backed named Claude/Codex profiles | Complete |
+| discovery | Discover supported provider credentials and sessions | `src-tauri/src/discovery.rs`, `src-tauri/src/environment.rs` | `src-tauri/tests/discovery.rs`, `src-tauri/tests/environment.rs` | Bounded Windows profile/credential discovery | Complete |
+| cache-stamp | Never show one account's snapshot as another | `src-tauri/src/cache.rs` | `src-tauri/tests/cache.rs` | Account-stamped `%APPDATA%` cache | Complete |
+| cli-api | Stable limits/usage contracts and provider filtering | `src-tauri/src/contracts.rs`, `src-tauri/src/httpapi.rs`, `src-tauri/src/bin/openmeter.rs` | `src-tauri/tests/contracts.rs`, `src-tauri/tests/httpapi.rs`, `src-tauri/tests/cli.rs`, `scripts/smoke-install.ps1` | Loopback API plus installed `openmeter` CLI | Complete |
+| dashboard | Account-first cards, customization, share, quick links | `src/main.ts`, `src/layout.ts`, `src/styles.css` | `tests/layout.test.ts`, `tests/accounts-ui.test.ts`, `npm run build`, `scripts/smoke-install.ps1` | Native Tauri/WebView2 popover | Complete |
+| tray | Menu-bar metrics, refresh, and launch behavior | `src-tauri/src/lib.rs`, `src-tauri/src/platform.rs` | `src-tauri/tests/platform.rs`, `scripts/smoke-install.ps1` | Windows notification-area icons and single instance | Complete |
+| pace | Reset-window pacing and worsening alerts | `src/main.ts`, `src-tauri/src/alerts.rs` | `npm test -- --run`, `cargo test --manifest-path src-tauri/Cargo.toml --all-targets` | Windows toast notifications | Complete |
+| spend | Local daily/model spend and pricing | `src-tauri/src/spend.rs`, `src-tauri/src/pricing.rs` | Unit tests in `src-tauri/src/spend.rs` and `src-tauri/src/pricing.rs` | Local Windows log parsing only | Complete |
+| pi | Pi session history contributes to the stable account | `src-tauri/src/spend.rs` | `src-tauri/tests/pi_history.rs` | Account-scoped local JSONL folding | Complete |
+| proxy | Optional outbound proxy without proxying loopback/sync | `src-tauri/src/providers/mod.rs`, `src/main.ts` | Provider unit tests plus `npm run build` | reqwest proxy with localhost bypass; sync is exact-host/no-proxy | Complete |
+| privacy | Capture exclusion, neutral tray mode, redacted diagnostics | `src-tauri/src/platform.rs`, `src-tauri/src/redaction.rs`, `src/privacy.ts` | `src-tauri/tests/platform.rs`, `src-tauri/tests/redaction.rs`, `tests/privacy.test.ts` | `WDA_EXCLUDEFROMCAPTURE` and Ctrl+Shift+P | Complete |
+| updates | Stable/beta channels and signed updater metadata | `src-tauri/src/updates.rs`, `.github/workflows/release.yml`, `install.ps1` | `src-tauri/tests/update_channel.rs`, `scripts/test-release-workflow.ps1`, `scripts/test-install-script.ps1` | Tauri updater plus fail-closed Authenticode pipeline | Complete |
+| cors | Secure local API default with explicit compatibility mode | `src-tauri/src/httpapi.rs`, `src/settings-compatibility.ts` | `src-tauri/tests/httpapi.rs`, `tests/settings-compatibility.test.ts` | No browser CORS unless explicitly enabled | Complete |
+| sync | iCloud-style normalized history sync | `crates/openmeter-sync-protocol`, `src-tauri/src/sync_runtime.rs`, `sync-hub` | Protocol/client/history/hub tests and `scripts/test-sync-hub.ps1` | XChaCha20-Poly1305 over a private Tailscale Windows service | Complete |
+
+Live acceptance completed on the target Windows 11 PC for installation, in-place upgrade, tray launch, CLI/PATH, loopback API, provider rendering, Credential Manager storage, and first encrypted sync. Mini PC acceptance covered health, enrollment, authentication, opaque transfer, restart persistence, revocation, exact Tailscale firewall scope, and LocalService execution. Authenticode live acceptance remains gated only by the external Microsoft Trusted Signing identity/profile setup described in `docs/releasing.md`.
