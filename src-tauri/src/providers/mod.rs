@@ -537,6 +537,9 @@ pub struct Snapshot {
     /// Opaque one-way credential identity used only to isolate local cache entries.
     #[serde(default)]
     pub credential_stamp: String,
+    /// Opaque stable account identity used to reject cache entries after card reassignment.
+    #[serde(default)]
+    pub account_identity_stamp: String,
     #[serde(default)]
     pub fetched_at: i64,
     #[serde(default)]
@@ -559,6 +562,7 @@ impl Snapshot {
             account_id: default_account_id(),
             card_id: id.into(),
             credential_stamp: String::new(),
+            account_identity_stamp: String::new(),
             fetched_at,
             expires_at: fetched_at + 5 * 60 * 1000,
             name: name.into(),
@@ -579,6 +583,7 @@ impl Snapshot {
             account_id: default_account_id(),
             card_id: id.into(),
             credential_stamp: String::new(),
+            account_identity_stamp: String::new(),
             fetched_at,
             expires_at: fetched_at,
             name: name.into(),
@@ -599,6 +604,7 @@ impl Snapshot {
             account_id: default_account_id(),
             card_id: id.into(),
             credential_stamp: String::new(),
+            account_identity_stamp: String::new(),
             fetched_at,
             expires_at: fetched_at,
             name: name.into(),
@@ -624,6 +630,7 @@ impl Snapshot {
         self.card_id = account.card_id.clone();
         self.name = account.display_name.clone();
         self.credential_stamp = credential_stamp.to_string();
+        self.account_identity_stamp = account.identity_stamp();
         self.fetched_at = fetched_at;
         self.expires_at = expires_at;
         self

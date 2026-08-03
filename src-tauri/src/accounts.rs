@@ -152,6 +152,11 @@ impl AccountContext {
             .find(|source| source.holds_default_source)
             .or_else(|| self.sources.first())
     }
+
+    pub fn identity_stamp(&self) -> String {
+        let identity = self.identity_key.as_deref().unwrap_or(&self.card_id);
+        crate::redaction::credential_stamp(format!("{}\0{identity}", self.provider_id).as_bytes())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

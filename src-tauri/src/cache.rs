@@ -3,6 +3,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use crate::accounts::AccountContext;
 use crate::providers::ProviderSnapshot;
 
 const CACHE_VERSION: u32 = 1;
@@ -55,6 +56,24 @@ impl SnapshotCache {
         self.matching(card_id, credential_stamp)
     }
 
+    pub fn fresh_for_account(
+        &self,
+        account: &AccountContext,
+        credential_stamp: &str,
+        now: i64,
+    ) -> Option<&ProviderSnapshot> {
+        self.matching_account(account, credential_stamp)
+            .filter(|snapshot| now < snapshot.expires_at)
+    }
+
+    pub fn last_good_for_account(
+        &self,
+        account: &AccountContext,
+        credential_stamp: &str,
+    ) -> Option<&ProviderSnapshot> {
+        self.matching_account(account, credential_stamp)
+    }
+
     pub fn read(path: &Path) -> Result<Self, String> {
         match std::fs::read_to_string(path) {
             Ok(raw) => {
@@ -85,6 +104,16 @@ impl SnapshotCache {
                     && snapshot.status == "ok"
             })
             .max_by_key(|snapshot| snapshot.fetched_at)
+    }
+
+    fn matching_account(
+        &self,
+        account: &AccountContext,
+        credential_stamp: &str,
+    ) -> Option<&ProviderSnapshot> {
+        let identity_stamp = account.identity_stamp();
+        self.matching(&account.card_id, credential_stamp)
+            .filter(|snapshot| snapshot.account_identity_stamp == identity_stamp)
     }
 
     fn validate(&self) -> Result<(), String> {

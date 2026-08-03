@@ -79,7 +79,7 @@ impl RefreshCoordinator {
             .filter(|target| matches_filter(&target.account, filter))
             .filter_map(|target| {
                 cache
-                    .last_good(&target.account.card_id, &target.credential_stamp)
+                    .last_good_for_account(&target.account, &target.credential_stamp)
                     .cloned()
             })
             .collect()
@@ -108,7 +108,7 @@ impl RefreshCoordinator {
             if !force {
                 let fresh = self.cache.lock().ok().and_then(|cache| {
                     cache
-                        .fresh(&target.account.card_id, &target.credential_stamp, now)
+                        .fresh_for_account(&target.account, &target.credential_stamp, now)
                         .cloned()
                 });
                 if let Some(snapshot) = fresh {
@@ -222,7 +222,7 @@ impl RefreshCoordinator {
     ) -> ProviderSnapshot {
         let previous = self.cache.lock().ok().and_then(|cache| {
             cache
-                .last_good(&target.account.card_id, &target.credential_stamp)
+                .last_good_for_account(&target.account, &target.credential_stamp)
                 .cloned()
         });
         if let Some(mut snapshot) = previous {
@@ -240,7 +240,12 @@ impl RefreshCoordinator {
 }
 
 fn target_key(target: &RefreshTarget) -> String {
-    format!("{}\0{}", target.account.card_id, target.credential_stamp)
+    format!(
+        "{}\0{}\0{}",
+        target.account.card_id,
+        target.account.identity_stamp(),
+        target.credential_stamp
+    )
 }
 
 fn matches_filter(account: &AccountContext, filter: Option<&str>) -> bool {
