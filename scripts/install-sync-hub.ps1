@@ -54,10 +54,12 @@ if ($existing) {
 }
 
 $serviceCommand = "`"$InstalledBinary`" service run --bind $BindAddress --database $DatabasePath --pepper-file $PepperPath"
-& sc.exe create $ServiceName "binPath= $serviceCommand" 'start= delayed-auto' 'obj= NT AUTHORITY\LocalService' | Out-Null
+& sc.exe create $ServiceName 'binPath=' $serviceCommand 'start=' 'delayed-auto' `
+    'obj=' 'NT AUTHORITY\LocalService' | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'Could not create the sync service.' }
 & sc.exe description $ServiceName 'Stores end-to-end encrypted OpenMeter history envelopes on the private tailnet.' | Out-Null
-& sc.exe failure $ServiceName 'reset= 86400' 'actions= restart/60000/restart/60000/none/0' | Out-Null
+& sc.exe failure $ServiceName 'reset=' '86400' `
+    'actions=' 'restart/60000/restart/60000/none/0' | Out-Null
 
 Remove-NetFirewallRule -DisplayName $FirewallRule -ErrorAction SilentlyContinue
 # RemoteAddress 100.64.0.0/10 is deliberately tailnet-only.
