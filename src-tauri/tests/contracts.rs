@@ -1,11 +1,33 @@
-use openmeter_lib::accounts::AccountContext;
-use openmeter_lib::contracts::{serialize_limits, serialize_usage};
+use openmeter_lib::accounts::{AccountContext, AccountRegistry};
+use openmeter_lib::contracts::{serialize_limits, serialize_limits_with_registry, serialize_usage};
 use openmeter_lib::providers::{Metric, ProviderSnapshot};
 
 const FETCHED_AT: i64 = 1_783_906_770_000;
 const EXPIRES_AT: i64 = 1_783_907_070_000;
 const GENERATED_AT: i64 = 1_783_906_800_000;
 const RESET_AT: i64 = 1_783_922_400_000;
+
+#[test]
+fn account_rename_is_resolved_when_serialized_without_rewriting_cached_snapshot() {
+    let account = AccountContext::named("claude", "work", "Old").unwrap();
+    let mut registry = AccountRegistry::from_accounts(vec![account.clone()]).unwrap();
+    let snapshot = ProviderSnapshot::ok(
+        &account.card_id,
+        "Claude",
+        None,
+        vec![Metric::progress("Session", 25.0, None)],
+    )
+    .with_cache_identity(&account, "credential-work", FETCHED_AT, EXPIRES_AT);
+    registry.rename("claude--work", "Company").unwrap();
+
+    let wire = serialize_limits_with_registry(&[snapshot.clone()], GENERATED_AT, &registry);
+
+    assert_eq!(snapshot.name, "Claude — Old");
+    assert_eq!(
+        wire["providers"]["claude--work"]["displayName"],
+        "Claude — Company"
+    );
+}
 
 #[test]
 fn limits_contract_is_account_aware_scalar_and_fixture_stable() {
