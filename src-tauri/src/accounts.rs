@@ -275,9 +275,11 @@ impl AccountRegistry {
                     ),
                     2 => serde_json::from_str(raw)
                         .map_err(|error| format!("parse {}: {error}", path.display()))?,
-                    other => return Err(format!(
+                    other => {
+                        return Err(format!(
                         "unsupported account registry version {other}; expected {REGISTRY_VERSION}"
-                    )),
+                    ))
+                    }
                 };
                 registry.validate()?;
                 Ok(registry)
