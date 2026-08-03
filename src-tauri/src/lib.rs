@@ -10,7 +10,7 @@ pub mod refresh;
 pub mod redaction;
 mod pricing;
 pub mod providers;
-mod spend;
+pub mod spend;
 mod telemetry;
 
 use std::path::PathBuf;

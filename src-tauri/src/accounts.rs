@@ -282,6 +282,18 @@ impl AccountRegistry {
                 && source.holds_default_source
         });
 
+        if source.holds_default_source {
+            for account in self
+                .accounts
+                .iter_mut()
+                .filter(|account| account.provider_id == provider_id)
+            {
+                account
+                    .sources
+                    .retain(|existing| !existing.holds_default_source);
+            }
+        }
+
         if let Some(position) = matching_identity.or(matching_location).or(default_record) {
             let account = &mut self.accounts[position];
             account.identity_key = Some(identity_key.to_string());
@@ -413,12 +425,6 @@ impl AccountRegistry {
             if !cards.insert(account.card_id.clone()) {
                 return Err(format!(
                     "duplicate account card id '{}': registry rejected",
-                    account.card_id
-                ));
-            }
-            if account.sources.is_empty() {
-                return Err(format!(
-                    "account '{}' must have at least one credential source",
                     account.card_id
                 ));
             }

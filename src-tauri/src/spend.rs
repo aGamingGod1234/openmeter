@@ -20,6 +20,148 @@ use std::time::{Duration, SystemTime};
 use crate::pricing;
 use crate::providers;
 
+const MAX_PI_FILES: usize = 4_096;
+const MAX_PI_DEPTH: usize = 16;
+const MAX_PI_LINES_PER_FILE: usize = 100_000;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AccountUsageEvent {
+    pub record_id: String,
+    pub provider_id: String,
+    pub event_id: Option<String>,
+    pub timestamp_ms: i64,
+    pub model: String,
+    pub tokens: u64,
+    pub carried_cost: Option<f64>,
+}
+
+pub fn collect_pi_events(
+    root: &Path,
+    default_owner: &crate::accounts::AccountContext,
+) -> Vec<AccountUsageEvent> {
+    if !default_owner
+        .sources
+        .iter()
+        .any(|source| source.holds_default_source)
+    {
+        return Vec::new();
+    }
+    let mut files = Vec::new();
+    collect_pi_files(root, 0, &mut files);
+    let mut seen = HashSet::new();
+    let mut events = Vec::new();
+    for path in files {
+        let Ok(file) = fs::File::open(path) else {
+            continue;
+        };
+        for line in BufReader::new(file)
+            .lines()
+            .take(MAX_PI_LINES_PER_FILE)
+            .map_while(Result::ok)
+        {
+            let Some(event) = parse_pi_line(&line, default_owner) else {
+                continue;
+            };
+            if let Some(id) = event.event_id.as_deref() {
+                if !seen.insert(id.to_string()) {
+                    continue;
+                }
+            }
+            events.push(event);
+        }
+    }
+    events
+}
+
+fn collect_pi_files(root: &Path, depth: usize, files: &mut Vec<PathBuf>) {
+    if depth > MAX_PI_DEPTH || files.len() >= MAX_PI_FILES {
+        return;
+    }
+    let Ok(entries) = fs::read_dir(root) else {
+        return;
+    };
+    for entry in entries.take(MAX_PI_FILES.saturating_sub(files.len())) {
+        let Ok(entry) = entry else { continue };
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if file_type.is_symlink() {
+            continue;
+        }
+        let path = entry.path();
+        if file_type.is_dir() {
+            collect_pi_files(&path, depth + 1, files);
+        } else if path.extension().is_some_and(|extension| extension == "jsonl") {
+            files.push(path);
+        }
+        if files.len() >= MAX_PI_FILES {
+            break;
+        }
+    }
+}
+
+fn parse_pi_line(
+    line: &str,
+    owner: &crate::accounts::AccountContext,
+) -> Option<AccountUsageEvent> {
+    if !line.contains("\"usage\"") {
+        return None;
+    }
+    let document: Value = serde_json::from_str(line).ok()?;
+    if document.get("type").and_then(Value::as_str) != Some("message") {
+        return None;
+    }
+    let message = document.get("message")?;
+    if message.get("role").and_then(Value::as_str) != Some("assistant") {
+        return None;
+    }
+    let provider = message.get("provider").and_then(Value::as_str)?;
+    if pi_provider_family(provider) != Some(owner.provider_id.as_str()) {
+        return None;
+    }
+    let usage = message.get("usage")?;
+    let timestamp_ms = chrono::DateTime::parse_from_rfc3339(
+        document.get("timestamp").and_then(Value::as_str)?,
+    )
+    .ok()?
+    .timestamp_millis();
+    Some(AccountUsageEvent {
+        record_id: owner.card_id.clone(),
+        provider_id: owner.provider_id.clone(),
+        event_id: document
+            .get("id")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        timestamp_ms,
+        model: message
+            .get("model")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .trim()
+            .to_string(),
+        tokens: usage
+            .get("totalTokens")
+            .and_then(Value::as_u64)
+            .unwrap_or_default(),
+        carried_cost: usage
+            .get("cost")
+            .and_then(|cost| cost.get("total"))
+            .and_then(Value::as_f64),
+    })
+}
+
+fn pi_provider_family(provider: &str) -> Option<&'static str> {
+    match provider {
+        "anthropic" | "claude-agent-sdk" => Some("claude"),
+        "openai-codex" => Some("codex"),
+        "cursor" => Some("cursor"),
+        "zai" | "zhipu" => Some("zai"),
+        "google-antigravity" => Some("antigravity"),
+        "github-copilot" => Some("copilot"),
+        _ => None,
+    }
+}
+
 pub const TREND_DAYS: usize = 30;
 
 #[derive(Serialize, Clone)]
