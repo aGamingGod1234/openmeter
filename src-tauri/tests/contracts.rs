@@ -20,7 +20,8 @@ fn account_rename_is_resolved_when_serialized_without_rewriting_cached_snapshot(
     .with_cache_identity(&account, "credential-work", FETCHED_AT, EXPIRES_AT);
     registry.rename("claude--work", "Company").unwrap();
 
-    let wire = serialize_limits_with_registry(&[snapshot.clone()], GENERATED_AT, &registry);
+    let wire =
+        serialize_limits_with_registry(std::slice::from_ref(&snapshot), GENERATED_AT, &registry);
 
     assert_eq!(snapshot.name, "Claude — Old");
     assert_eq!(
