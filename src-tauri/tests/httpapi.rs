@@ -1,5 +1,5 @@
 use openmeter_lib::accounts::{AccountContext, AccountRegistry};
-use openmeter_lib::httpapi::ApiState;
+use openmeter_lib::httpapi::{ApiPolicy, ApiState};
 use openmeter_lib::providers::{Metric, ProviderSnapshot};
 use tiny_http::Method;
 
@@ -126,4 +126,23 @@ fn protocol_semantics_are_bounded_and_do_not_enable_browser_cors() {
     let busy = saturated.route(&Method::Get, "/v1/usage");
     assert_eq!(busy.status, 503);
     assert_eq!(busy.body["error"], "server_busy");
+}
+
+#[test]
+fn browser_cors_is_runtime_updatable_and_disabled_by_default() {
+    let state = ApiState::new(registry());
+
+    let secure = state.route(&Method::Get, "/v1/usage");
+    assert!(secure
+        .headers
+        .iter()
+        .all(|(name, _)| !name.eq_ignore_ascii_case("Access-Control-Allow-Origin")));
+
+    state.set_policy(ApiPolicy {
+        allow_browser_cors: true,
+    });
+    let compatible = state.route(&Method::Get, "/v1/usage");
+    assert!(compatible.headers.iter().any(|(name, value)| {
+        name.eq_ignore_ascii_case("Access-Control-Allow-Origin") && value == "*"
+    }));
 }
