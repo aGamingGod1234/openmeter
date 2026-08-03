@@ -25,7 +25,8 @@ Copy-Item -LiteralPath $source -Destination $InstalledBinary -Force
 
 if (-not (Test-Path -LiteralPath $PepperPath)) {
     $pepper = [byte[]]::new(32)
-    [Security.Cryptography.RandomNumberGenerator]::Fill($pepper)
+    $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+    try { $rng.GetBytes($pepper) } finally { $rng.Dispose() }
     [IO.File]::WriteAllBytes($PepperPath, $pepper)
     [Array]::Clear($pepper, 0, $pepper.Length)
 }

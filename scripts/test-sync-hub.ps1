@@ -47,7 +47,8 @@ $second = New-TestDevice
 $generatedAt = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
 $nonce = [Convert]::ToBase64String([byte[]](1..24))
 $ciphertextBytes = [byte[]]::new(64)
-[Security.Cryptography.RandomNumberGenerator]::Fill($ciphertextBytes)
+$rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+try { $rng.GetBytes($ciphertextBytes) } finally { $rng.Dispose() }
 $ciphertext = [Convert]::ToBase64String($ciphertextBytes)
 [Array]::Clear($ciphertextBytes, 0, $ciphertextBytes.Length)
 $envelope = @{
