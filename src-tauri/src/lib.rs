@@ -13,6 +13,7 @@ mod pricing;
 pub mod providers;
 pub mod spend;
 pub mod sync_client;
+pub mod sync_history;
 mod telemetry;
 pub mod updates;
 

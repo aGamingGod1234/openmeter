@@ -198,6 +198,15 @@ pub struct ModelSpend {
     pub tokens: f64,
 }
 
+#[derive(Serialize, Clone)]
+pub struct DailySpend {
+    pub day: String,
+    pub cost: f64,
+    pub tokens: f64,
+    pub models: Vec<ModelSpend>,
+    pub unpriced_models: Vec<String>,
+}
+
 #[derive(Serialize, Clone, Default)]
 pub struct Window {
     pub cost: f64,
@@ -221,6 +230,8 @@ pub struct ProviderSpend {
     /// under-report and the ⚠ says so.
     pub unpriced: u64,
     pub unpriced_models: Vec<String>,
+    /// Normalized per-day facts used by encrypted peer history.
+    pub daily: Vec<DailySpend>,
 }
 
 impl ProviderSpend {
@@ -437,9 +448,15 @@ fn finalize_models(raw: HashMap<String, (f64, f64)>, window_cost: f64) -> Vec<Mo
 
 fn build_spend(id: &str, name: &str, data: FileData) -> ProviderSpend {
     let today = Local::now().date_naive().num_days_from_ce();
+    build_spend_at(id, name, data, today)
+}
+
+fn build_spend_at(id: &str, name: &str, data: FileData, today: i32) -> ProviderSpend {
     let mut unpriced_models: Vec<String> = data.unpriced.keys().cloned().collect();
     unpriced_models.sort();
     unpriced_models.truncate(5);
+    let daily = normalized_days(&data.days, &data.unpriced, today);
+    let unpriced = data.unpriced.values().sum();
     let days = data.days;
     let mut sp = ProviderSpend {
         id: id.to_string(),
@@ -448,8 +465,9 @@ fn build_spend(id: &str, name: &str, data: FileData) -> ProviderSpend {
         yesterday: Window::default(),
         last30: Window::default(),
         trend: vec![0.0; TREND_DAYS],
-        unpriced: data.unpriced.values().sum(),
+        unpriced,
         unpriced_models,
+        daily,
     };
     let mut models: [HashMap<String, (f64, f64)>; 3] =
         [HashMap::new(), HashMap::new(), HashMap::new()];
@@ -482,6 +500,56 @@ fn build_spend(id: &str, name: &str, data: FileData) -> ProviderSpend {
     sp.yesterday.models = finalize_models(m1, sp.yesterday.cost);
     sp.last30.models = finalize_models(m2, sp.last30.cost);
     sp
+}
+
+fn normalized_days(
+    days: &DayMap,
+    unpriced: &HashMap<String, u64>,
+    today: i32,
+) -> Vec<DailySpend> {
+    let mut normalized: HashMap<i32, DailySpend> = HashMap::new();
+    for ((day, model), (cost, tokens)) in days {
+        if *day <= today - TREND_DAYS as i32 {
+            continue;
+        }
+        let Some(date) = chrono::NaiveDate::from_num_days_from_ce_opt(*day) else {
+            continue;
+        };
+        let row = normalized.entry(*day).or_insert_with(|| DailySpend {
+            day: date.format("%Y-%m-%d").to_string(),
+            cost: 0.0,
+            tokens: 0.0,
+            models: Vec::new(),
+            unpriced_models: Vec::new(),
+        });
+        row.cost += *cost;
+        row.tokens += *tokens;
+        row.models.push(ModelSpend {
+            model: model.clone(),
+            cost: *cost,
+            tokens: *tokens,
+        });
+    }
+    if !unpriced.is_empty() {
+        let date = chrono::NaiveDate::from_num_days_from_ce_opt(today)
+            .map(|date| date.format("%Y-%m-%d").to_string())
+            .unwrap_or_default();
+        let row = normalized.entry(today).or_insert_with(|| DailySpend {
+            day: date,
+            cost: 0.0,
+            tokens: 0.0,
+            models: Vec::new(),
+            unpriced_models: Vec::new(),
+        });
+        row.unpriced_models = unpriced.keys().cloned().collect();
+        row.unpriced_models.sort();
+    }
+    let mut rows: Vec<DailySpend> = normalized.into_values().collect();
+    for row in &mut rows {
+        row.models.sort_by(|left, right| left.model.cmp(&right.model));
+    }
+    rows.sort_by(|left, right| left.day.cmp(&right.day));
+    rows
 }
 
 /// All .jsonl files under `root` modified in the last 31 days.
@@ -2103,7 +2171,7 @@ fn pi_events_data(events: Vec<AccountUsageEvent>) -> FileData {
     data
 }
 
-fn merge_provider_spend(target: &mut ProviderSpend, source: ProviderSpend) {
+pub(crate) fn merge_provider_spend(target: &mut ProviderSpend, source: ProviderSpend) {
     merge_window(&mut target.today, source.today);
     merge_window(&mut target.yesterday, source.yesterday);
     merge_window(&mut target.last30, source.last30);
@@ -2114,6 +2182,71 @@ fn merge_provider_spend(target: &mut ProviderSpend, source: ProviderSpend) {
     target.unpriced_models.extend(source.unpriced_models);
     target.unpriced_models.sort();
     target.unpriced_models.dedup();
+    for source_day in source.daily {
+        if let Some(target_day) = target.daily.iter_mut().find(|day| day.day == source_day.day) {
+            target_day.cost += source_day.cost;
+            target_day.tokens += source_day.tokens;
+            for model in source_day.models {
+                if let Some(existing) = target_day
+                    .models
+                    .iter_mut()
+                    .find(|existing| existing.model == model.model)
+                {
+                    existing.cost += model.cost;
+                    existing.tokens += model.tokens;
+                } else {
+                    target_day.models.push(model);
+                }
+            }
+            target_day
+                .unpriced_models
+                .extend(source_day.unpriced_models);
+            target_day.unpriced_models.sort();
+            target_day.unpriced_models.dedup();
+        } else {
+            target.daily.push(source_day);
+        }
+    }
+    target.daily.sort_by(|left, right| left.day.cmp(&right.day));
+}
+
+pub(crate) fn from_daily(
+    id: &str,
+    name: &str,
+    daily: Vec<DailySpend>,
+    today: &str,
+) -> ProviderSpend {
+    let mut data = FileData::default();
+    for row in daily {
+        let Ok(date) = chrono::NaiveDate::parse_from_str(&row.day, "%Y-%m-%d") else {
+            continue;
+        };
+        let day = date.num_days_from_ce();
+        let model_cost: f64 = row.models.iter().map(|model| model.cost).sum();
+        let model_tokens: f64 = row.models.iter().map(|model| model.tokens).sum();
+        for model in row.models {
+            let entry = data.days.entry((day, model.model)).or_default();
+            entry.0 += model.cost;
+            entry.1 += model.tokens;
+        }
+        let remainder_cost = (row.cost - model_cost).max(0.0);
+        let remainder_tokens = (row.tokens - model_tokens).max(0.0);
+        if remainder_cost > 0.0 || remainder_tokens > 0.0 {
+            let entry = data
+                .days
+                .entry((day, "unattributed".to_string()))
+                .or_default();
+            entry.0 += remainder_cost;
+            entry.1 += remainder_tokens;
+        }
+        for model in row.unpriced_models {
+            *data.unpriced.entry(model).or_insert(0) += 1;
+        }
+    }
+    let today = chrono::NaiveDate::parse_from_str(today, "%Y-%m-%d")
+        .map(|date| date.num_days_from_ce())
+        .unwrap_or_else(|_| Local::now().date_naive().num_days_from_ce());
+    build_spend_at(id, name, data, today)
 }
 
 fn merge_window(target: &mut Window, source: Window) {
