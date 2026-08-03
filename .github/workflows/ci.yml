@@ -29,6 +29,13 @@ jobs:
       - name: Check sync hub installer invariants
         shell: pwsh
         run: .\scripts\test-sync-hub.ps1 -StaticOnly
+      - name: Check trusted release invariants
+        shell: pwsh
+        run: |
+          .\scripts\test-release-workflow.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          .\scripts\test-install-script.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Run Clippy
         shell: pwsh
         run: |
