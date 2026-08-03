@@ -26,6 +26,9 @@ jobs:
             src-tauri/src/redaction.rs `
             src-tauri/src/refresh.rs `
             src-tauri/src/bin/openmeter.rs
+      - name: Check sync hub installer invariants
+        shell: pwsh
+        run: .\scripts\test-sync-hub.ps1 -StaticOnly
       - name: Run Clippy
         shell: pwsh
         run: |
