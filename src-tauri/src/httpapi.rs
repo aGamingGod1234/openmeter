@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 use tiny_http::Method;
 
 use crate::accounts::AccountRegistry;
-use crate::contracts::{serialize_limits, serialize_usage};
+use crate::contracts::{serialize_limits_with_registry, serialize_usage_with_registry};
 use crate::providers::ProviderSnapshot;
 
 const DEFAULT_MAX_IN_FLIGHT: usize = 16;
@@ -85,10 +85,17 @@ impl ApiState {
             Err(_) => return RouteResponse::json(503, json!({"error": "server_busy"})),
         };
         match path {
-            "/v1/usage" => RouteResponse::json(200, serialize_usage(&published.snapshots)),
+            "/v1/usage" => RouteResponse::json(
+                200,
+                serialize_usage_with_registry(&published.snapshots, &self.registry),
+            ),
             "/v1/limits" => RouteResponse::json(
                 200,
-                serialize_limits(&published.snapshots, published.generated_at),
+                serialize_limits_with_registry(
+                    &published.snapshots,
+                    published.generated_at,
+                    &self.registry,
+                ),
             ),
             _ => {
                 if let Some(token) = path.strip_prefix("/v1/usage/") {
@@ -120,9 +127,9 @@ impl ApiState {
             .cloned()
             .collect();
         let body = if limits {
-            serialize_limits(&selected, published.generated_at)
+            serialize_limits_with_registry(&selected, published.generated_at, &self.registry)
         } else {
-            serialize_usage(&selected)
+            serialize_usage_with_registry(&selected, &self.registry)
         };
         RouteResponse::json(200, body)
     }

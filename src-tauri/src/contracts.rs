@@ -24,7 +24,31 @@ pub struct LimitResourceDescriptor {
 }
 
 pub fn serialize_usage(snapshots: &[ProviderSnapshot]) -> Value {
-    Value::Array(snapshots.iter().map(usage_snapshot).collect())
+    serialize_usage_resolved(snapshots, None)
+}
+
+pub fn serialize_usage_with_registry(
+    snapshots: &[ProviderSnapshot],
+    registry: &AccountRegistry,
+) -> Value {
+    serialize_usage_resolved(snapshots, Some(registry))
+}
+
+fn serialize_usage_resolved(
+    snapshots: &[ProviderSnapshot],
+    registry: Option<&AccountRegistry>,
+) -> Value {
+    Value::Array(
+        snapshots
+            .iter()
+            .map(|snapshot| {
+                let display_name = registry
+                    .map(|registry| registry.resolve_name(card_id(snapshot), &snapshot.name))
+                    .unwrap_or_else(|| snapshot.name.clone());
+                usage_snapshot(snapshot, display_name)
+            })
+            .collect(),
+    )
 }
 
 pub fn serialize_limits(snapshots: &[ProviderSnapshot], generated_at: i64) -> Value {
@@ -96,7 +120,7 @@ pub fn descriptors_for(provider_id: &str) -> &'static [LimitResourceDescriptor] 
     }
 }
 
-fn usage_snapshot(snapshot: &ProviderSnapshot) -> Value {
+fn usage_snapshot(snapshot: &ProviderSnapshot, display_name: String) -> Value {
     let lines: Vec<Value> = snapshot
         .metrics
         .iter()
@@ -126,7 +150,7 @@ fn usage_snapshot(snapshot: &ProviderSnapshot) -> Value {
         .collect();
     json!({
         "providerId": card_id(snapshot),
-        "displayName": snapshot.name,
+        "displayName": display_name,
         "plan": snapshot.plan,
         "lines": lines,
         "fetchedAt": iso8601(snapshot.fetched_at),
