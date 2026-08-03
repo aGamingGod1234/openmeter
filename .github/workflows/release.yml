@@ -28,27 +28,49 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          workspaces: |
+            src-tauri
+            crates/openmeter-sync-protocol
+            sync-hub
 
       - name: Install frontend deps
         run: npm ci
 
       - name: Verify frontend
+        shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
           npm test -- --run
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           npm run build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Test bundle path invariants
         shell: pwsh
         run: .\scripts\test-prepare-bundle.ps1
 
       - name: Verify Rust
+        shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
           cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo test --manifest-path src-tauri/Cargo.toml --all-targets
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo clippy --manifest-path crates/openmeter-sync-protocol/Cargo.toml --all-targets -- -D warnings
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --manifest-path crates/openmeter-sync-protocol/Cargo.toml --all-targets
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo clippy --manifest-path sync-hub/Cargo.toml --all-targets -- -D warnings
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --manifest-path sync-hub/Cargo.toml --all-targets
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build bundled CLI
         run: cargo build --manifest-path src-tauri/Cargo.toml --release --bin openmeter
+
+      - name: Build sync hub
+        run: cargo build --manifest-path sync-hub/Cargo.toml --release
 
       - name: Stage bundle inputs
         shell: pwsh
@@ -97,7 +119,9 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         uses: actions/attest-build-provenance@v4
         with:
-          subject-path: src-tauri/target/release/bundle/nsis/*-setup.exe
+          subject-path: |
+            src-tauri/target/release/bundle/nsis/*-setup.exe
+            sync-hub/target/release/openmeter-sync-hub.exe
 
       - name: Upload artifacts (dry run only)
         if: github.event_name == 'workflow_dispatch'
@@ -109,6 +133,9 @@ jobs:
             src-tauri/target/release/bundle/nsis/*-setup.exe.sig
             latest.json
             SHA256SUMS.txt
+            sync-hub/target/release/openmeter-sync-hub.exe
+            scripts/install-sync-hub.ps1
+            scripts/uninstall-sync-hub.ps1
 
       - name: Create GitHub release
         if: startsWith(github.ref, 'refs/tags/')
@@ -118,6 +145,8 @@ jobs:
           gh release create $env:GITHUB_REF_NAME `
             --title "OpenMeter $($env:GITHUB_REF_NAME.TrimStart('v'))" `
             --generate-notes `
-            $exe.FullName "$($exe.FullName).sig" latest.json SHA256SUMS.txt
+            $exe.FullName "$($exe.FullName).sig" latest.json SHA256SUMS.txt `
+            sync-hub/target/release/openmeter-sync-hub.exe `
+            scripts/install-sync-hub.ps1 scripts/uninstall-sync-hub.ps1
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
