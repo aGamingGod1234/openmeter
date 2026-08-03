@@ -525,7 +525,12 @@ async fn fetch_usage(app: tauri::AppHandle) -> Vec<providers::Snapshot> {
         .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
         .unwrap_or_default();
 
-    let all = refresh::refresh_default(false, None, &disabled).await;
+    let mut all = refresh::refresh_default(false, None, &disabled).await;
+    if let Ok(registry) = accounts::AccountRegistry::load(&account_registry_path()) {
+        for snapshot in &mut all {
+            snapshot.name = registry.resolve_name(&snapshot.card_id, &snapshot.name);
+        }
+    }
     let enabled_ids: Vec<String> = all
         .iter()
         .map(|snapshot| snapshot.provider_id.clone())

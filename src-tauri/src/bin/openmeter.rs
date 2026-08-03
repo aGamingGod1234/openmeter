@@ -1,4 +1,6 @@
-use openmeter_lib::contracts::serialize_limits;
+use openmeter_lib::accounts::AccountRegistry;
+use openmeter_lib::contracts::{serialize_limits, serialize_limits_with_registry};
+use openmeter_lib::providers::config_dir;
 use openmeter_lib::refresh::{refresh_default, CliAction, CliOptions, CLI_HELP};
 
 #[tokio::main]
@@ -15,7 +17,10 @@ async fn main() {
         return;
     };
     let snapshots = refresh_default(options.force, options.filter.as_deref(), &[]).await;
-    let output = serialize_limits(&snapshots, chrono::Utc::now().timestamp_millis());
+    let generated_at = chrono::Utc::now().timestamp_millis();
+    let output = AccountRegistry::load(&config_dir().join("accounts-v1.json"))
+        .map(|registry| serialize_limits_with_registry(&snapshots, generated_at, &registry))
+        .unwrap_or_else(|_| serialize_limits(&snapshots, generated_at));
     match serde_json::to_string_pretty(&output) {
         Ok(json) => println!("{json}"),
         Err(error) => {
