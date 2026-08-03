@@ -8,6 +8,8 @@ use crate::accounts::AccountSource;
 use crate::environment::EnvironmentSnapshot;
 
 const MAX_DIRECTORY_ENTRIES: usize = 128;
+type IdentityClaim = (String, Option<String>);
+type IdentityReader = fn(&Path) -> Option<IdentityClaim>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiscoveredSource {
@@ -41,7 +43,7 @@ fn discover_candidates(
     provider_id: &str,
     candidates: Vec<PathBuf>,
     active: &Path,
-    identity_reader: fn(&Path) -> Option<(String, Option<String>)>,
+    identity_reader: IdentityReader,
 ) -> Vec<DiscoveredSource> {
     let active = canonical_directory(active);
     let mut seen = HashSet::new();
@@ -114,7 +116,7 @@ fn bounded_children(root: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
-fn claude_identity(root: &Path) -> Option<(String, Option<String>)> {
+fn claude_identity(root: &Path) -> Option<IdentityClaim> {
     if !root.join(".credentials.json").is_file() {
         return None;
     }
@@ -137,7 +139,7 @@ fn claude_identity(root: &Path) -> Option<(String, Option<String>)> {
     Some((identity.to_string(), label))
 }
 
-fn codex_identity(root: &Path) -> Option<(String, Option<String>)> {
+fn codex_identity(root: &Path) -> Option<IdentityClaim> {
     let document: Value =
         serde_json::from_slice(&std::fs::read(root.join("auth.json")).ok()?).ok()?;
     let tokens = document.get("tokens")?;
