@@ -10,27 +10,16 @@ use tower::ServiceExt;
 async fn enrollment_is_single_use_and_upload_requires_device_bearer() {
     let db_path = temp_db();
     let hub = Hub::new(Store::open(&db_path).unwrap(), [3; 32]);
-    let token = hub.create_enrollment(1_000).unwrap();
+    let now = now_ms();
+    let token = hub.create_enrollment(now).unwrap();
     let app = router(hub);
 
-    let enrolled = send_json(
-        &app,
-        "/v1/enroll",
-        None,
-        json!({"token": token, "now_ms": 1_001}),
-    )
-    .await;
+    let enrolled = send_json(&app, "/v1/enroll", None, json!({"token": token})).await;
     assert_eq!(enrolled.0, StatusCode::OK);
     let device_id = enrolled.1["device_id"].as_str().unwrap();
     let credential = enrolled.1["credential"].as_str().unwrap();
 
-    let reused = send_json(
-        &app,
-        "/v1/enroll",
-        None,
-        json!({"token": token, "now_ms": 1_002}),
-    )
-    .await;
+    let reused = send_json(&app, "/v1/enroll", None, json!({"token": token})).await;
     assert_eq!(reused.0, StatusCode::UNAUTHORIZED);
 
     let envelope = EncryptedEnvelope {
@@ -126,4 +115,11 @@ fn temp_db() -> std::path::PathBuf {
 
 fn cleanup(path: std::path::PathBuf) {
     let _ = std::fs::remove_file(path);
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64
 }

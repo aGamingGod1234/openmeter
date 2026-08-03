@@ -1,3 +1,5 @@
+mod api;
 mod store;
 
-pub use store::{HubError, PutError, Store};
+pub use api::{router, Hub};
+pub use store::{DeviceRecord, HubError, PutError, Store};

@@ -39,6 +39,13 @@ pub struct Store {
     connection: Mutex<Connection>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeviceRecord {
+    pub device_id: String,
+    pub credential_hash: [u8; 32],
+    pub revoked: bool,
+}
+
 impl Store {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, HubError> {
         let connection = Connection::open(path).map_err(|_| HubError::Database)?;
@@ -89,6 +96,67 @@ impl Store {
             )
             .map_err(|_| HubError::Database)?;
         transaction.commit().map_err(|_| HubError::Database)
+    }
+
+    pub fn create_enrollment(
+        &self,
+        token_hash: [u8; 32],
+        expires_at_ms: i64,
+    ) -> Result<(), HubError> {
+        let mut connection = self.connection.lock().map_err(|_| HubError::Database)?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|_| HubError::Database)?;
+        transaction
+            .execute(
+                "INSERT INTO enrollment_tokens(token_hash, expires_at_ms, consumed_at_ms)
+                 VALUES (?1, ?2, NULL)",
+                params![token_hash.as_slice(), expires_at_ms],
+            )
+            .map_err(|_| HubError::Database)?;
+        transaction.commit().map_err(|_| HubError::Database)
+    }
+
+    pub fn consume_enrollment(&self, token_hash: [u8; 32], now_ms: i64) -> Result<bool, HubError> {
+        let mut connection = self.connection.lock().map_err(|_| HubError::Database)?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|_| HubError::Database)?;
+        let changed = transaction
+            .execute(
+                "UPDATE enrollment_tokens SET consumed_at_ms = ?2
+                 WHERE token_hash = ?1 AND consumed_at_ms IS NULL AND expires_at_ms >= ?2",
+                params![token_hash.as_slice(), now_ms],
+            )
+            .map_err(|_| HubError::Database)?;
+        transaction.commit().map_err(|_| HubError::Database)?;
+        Ok(changed == 1)
+    }
+
+    pub fn devices(&self) -> Result<Vec<DeviceRecord>, HubError> {
+        let connection = self.connection.lock().map_err(|_| HubError::Database)?;
+        let mut statement = connection
+            .prepare(
+                "SELECT device_id, credential_hash, revoked_at_ms IS NOT NULL
+                 FROM devices ORDER BY device_id",
+            )
+            .map_err(|_| HubError::Database)?;
+        let rows = statement
+            .query_map([], |row| {
+                let bytes: Vec<u8> = row.get(1)?;
+                let mut credential_hash = [0_u8; 32];
+                if bytes.len() == credential_hash.len() {
+                    credential_hash.copy_from_slice(&bytes);
+                }
+                Ok(DeviceRecord {
+                    device_id: row.get(0)?,
+                    credential_hash,
+                    revoked: row.get(2)?,
+                })
+            })
+            .map_err(|_| HubError::Database)?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|_| HubError::Database)
     }
 
     pub fn put(

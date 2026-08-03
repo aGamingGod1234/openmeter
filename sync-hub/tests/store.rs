@@ -50,9 +50,7 @@ fn revoked_record_is_hidden_immediately_and_purged_after_thirty_days() {
     store.revoke("a", 2_000).unwrap();
 
     assert!(store.list_active("b", 2_001).unwrap().is_empty());
-    store
-        .purge(2_000 + 30 * 24 * 60 * 60 * 1_000 + 1)
-        .unwrap();
+    store.purge(2_000 + 30 * 24 * 60 * 60 * 1_000 + 1).unwrap();
     assert_eq!(store.envelope_count().unwrap(), 0);
     cleanup(path);
 }
