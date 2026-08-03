@@ -101,6 +101,51 @@ fn discovered_identities_get_stable_primary_and_sibling_cards_idempotently() {
 }
 
 #[test]
+fn moving_the_default_source_changes_its_only_account_owner() {
+    let mut registry = AccountRegistry::default();
+    registry
+        .upsert_discovered(
+            "claude",
+            "organization:personal",
+            Some("Personal"),
+            AccountSource::default_home("claude-home-personal"),
+        )
+        .unwrap();
+    registry
+        .upsert_discovered(
+            "claude",
+            "organization:company",
+            Some("Company"),
+            AccountSource::directory("claude-company", PathBuf::from(r"D:\ClaudeCompany")).unwrap(),
+        )
+        .unwrap();
+    registry
+        .upsert_discovered(
+            "claude",
+            "organization:company",
+            Some("Company"),
+            AccountSource::default_home("claude-home-company"),
+        )
+        .unwrap();
+
+    let owners: Vec<_> = registry
+        .accounts()
+        .iter()
+        .filter(|account| {
+            account
+                .sources
+                .iter()
+                .any(|source| source.holds_default_source)
+        })
+        .collect();
+    assert_eq!(owners.len(), 1);
+    assert_eq!(
+        owners[0].identity_key.as_deref(),
+        Some("organization:company")
+    );
+}
+
+#[test]
 fn default_and_named_accounts_have_stable_card_ids() {
     let default = AccountContext::default_for("claude").expect("valid default account");
     let work = AccountContext::named("claude", "work", "Work").expect("valid named account");
