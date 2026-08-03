@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-const REGISTRY_VERSION: u32 = 1;
+const REGISTRY_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -161,6 +161,32 @@ pub struct AccountRegistry {
     accounts: Vec<AccountContext>,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct VersionOneRegistry {
+    version: u32,
+    accounts: Vec<VersionOneAccount>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct VersionOneAccount {
+    provider_id: String,
+    account_id: AccountId,
+    card_id: String,
+    display_name: String,
+    source: VersionOneSource,
+    enabled: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+enum VersionOneSource {
+    DefaultHome,
+    Directory { path: PathBuf },
+    Manual,
+}
+
 impl Default for AccountRegistry {
     fn default() -> Self {
         Self {
@@ -236,8 +262,23 @@ impl AccountRegistry {
     pub fn load(path: &Path) -> Result<Self, String> {
         match std::fs::read_to_string(path) {
             Ok(raw) => {
-                let registry: Self = serde_json::from_str(raw.trim_start_matches('\u{feff}'))
-                    .map_err(|error| format!("parse {}: {error}", path.display()))?;
+                let raw = raw.trim_start_matches('\u{feff}');
+                let version = serde_json::from_str::<serde_json::Value>(raw)
+                    .map_err(|error| format!("parse {}: {error}", path.display()))?
+                    .get("version")
+                    .and_then(serde_json::Value::as_u64)
+                    .ok_or_else(|| format!("parse {}: missing registry version", path.display()))?;
+                let registry = match version {
+                    1 => migrate_version_one(
+                        serde_json::from_str(raw)
+                            .map_err(|error| format!("parse {}: {error}", path.display()))?,
+                    ),
+                    2 => serde_json::from_str(raw)
+                        .map_err(|error| format!("parse {}: {error}", path.display()))?,
+                    other => return Err(format!(
+                        "unsupported account registry version {other}; expected {REGISTRY_VERSION}"
+                    )),
+                };
                 registry.validate()?;
                 Ok(registry)
             }
@@ -308,6 +349,48 @@ impl AccountRegistry {
             }
         }
         Ok(())
+    }
+}
+
+fn migrate_version_one(registry: VersionOneRegistry) -> AccountRegistry {
+    debug_assert_eq!(registry.version, 1);
+    let accounts = registry
+        .accounts
+        .into_iter()
+        .map(|account| {
+            let label = account
+                .display_name
+                .split_once(" — ")
+                .map(|(_, label)| label.to_string());
+            let source = match account.source {
+                VersionOneSource::DefaultHome => {
+                    AccountSource::default_home(format!("{}-home", account.card_id))
+                }
+                VersionOneSource::Directory { path } => AccountSource {
+                    id: format!("{}-directory", account.card_id),
+                    kind: AccountSourceKind::Directory,
+                    path: Some(path),
+                    holds_default_source: false,
+                },
+                VersionOneSource::Manual => {
+                    AccountSource::manual(format!("{}-manual", account.card_id))
+                }
+            };
+            AccountContext {
+                provider_id: account.provider_id,
+                account_id: account.account_id,
+                card_id: account.card_id,
+                display_name: account.display_name,
+                identity_key: None,
+                label,
+                sources: vec![source],
+                enabled: account.enabled,
+            }
+        })
+        .collect();
+    AccountRegistry {
+        version: REGISTRY_VERSION,
+        accounts,
     }
 }
 
