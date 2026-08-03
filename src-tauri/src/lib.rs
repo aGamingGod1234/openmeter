@@ -14,6 +14,7 @@ pub mod providers;
 pub mod spend;
 pub mod sync_client;
 pub mod sync_history;
+mod sync_runtime;
 mod telemetry;
 pub mod updates;
 
@@ -22,6 +23,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
+use sync_runtime::{
+    sync_disable, sync_enroll, sync_import_recovery, sync_now, sync_revoke_device, sync_status,
+};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -141,6 +145,12 @@ fn config_with_defaults(mut cfg: Value) -> Value {
     obj.entry("telemetry").or_insert(json!(false));
     obj.entry("updateChannel").or_insert(json!("stable"));
     obj.entry("allowBrowserCors").or_insert(json!(false));
+    obj.entry("syncEnabled").or_insert(json!(false));
+    obj.entry("syncHubUrl")
+        .or_insert(json!("http://100.90.87.7:6740"));
+    obj.entry("syncDeviceId").or_insert(json!(""));
+    obj.entry("syncRevision").or_insert(json!(0));
+    obj.entry("syncLastSuccess").or_insert(json!(0));
     cfg
 }
 
@@ -183,6 +193,11 @@ const CONFIG_KEYS: &[&str] = &[
     "telemetry",
     "updateChannel",
     "allowBrowserCors",
+    "syncEnabled",
+    "syncHubUrl",
+    "syncDeviceId",
+    "syncRevision",
+    "syncLastSuccess",
 ];
 
 #[tauri::command]
@@ -630,12 +645,22 @@ async fn fetch_spend() -> Vec<spend::ProviderSpend> {
     // to the blocking scan.
     let cursor_csv = providers::cursor::fetch_usage_csv().await;
     let registry = accounts::AccountRegistry::load(&account_registry_path()).unwrap_or_default();
+    let registry_for_scan = registry.clone();
     let environment = environment::launch_environment().clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        spend::collect_for_accounts(cursor_csv, &registry, &environment)
+        spend::collect_for_accounts(cursor_csv, &registry_for_scan, &environment)
     })
         .await
         .unwrap_or_default();
+    let cfg = config_with_defaults(load_config());
+    let result = sync_history::merge_peer_history(
+        &result,
+        &sync_runtime::peer_history(),
+        &registry,
+        &sync_runtime::enabled_provider_ids(&cfg),
+        &chrono::Local::now().format("%Y-%m-%d").to_string(),
+    )
+    .total_spend;
     eprintln!(
         "[openmeter] spend: {} providers in {:?}",
         result.len(),
@@ -995,10 +1020,17 @@ pub fn run() {
             copy_diagnostics,
             codex_redeem_credit,
             install_update,
-            check_update
+            check_update,
+            sync_status,
+            sync_enroll,
+            sync_import_recovery,
+            sync_now,
+            sync_revoke_device,
+            sync_disable
         ])
         .setup(|app| {
             spawn_update_checker(app.handle());
+            sync_runtime::spawn_scheduler();
             let quit = MenuItem::with_id(app, "quit", "Quit OpenMeter", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&quit])?;
 

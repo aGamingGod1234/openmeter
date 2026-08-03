@@ -198,6 +198,40 @@
       </div>
 
       <div class="acc-group">
+        <button class="acc-head">Sync <span class="chev">&#8964;</span></button>
+        <div class="acc-body"><div class="acc-inner">
+          <p class="settings-note">
+            End-to-end encrypted history sync through your Mini PC on Tailscale. The hub stores ciphertext only.
+          </p>
+          <div class="setting-row">
+            <label for="sync-hub-url">Hub</label>
+            <input id="sync-hub-url" type="text" readonly />
+          </div>
+          <p class="settings-note" id="sync-summary">Checking sync status…</p>
+          <div id="sync-device-list" class="settings-note"></div>
+          <div class="setting-row">
+            <label for="sync-enrollment-token">Enrollment token</label>
+            <input id="sync-enrollment-token" type="password" autocomplete="off" spellcheck="false" />
+            <button id="sync-enroll" type="button">Enroll</button>
+          </div>
+          <div class="setting-row">
+            <label for="sync-recovery-import">Recovery key</label>
+            <input id="sync-recovery-import" type="password" autocomplete="off" spellcheck="false" />
+            <button id="sync-import-recovery" type="button">Import</button>
+          </div>
+          <div id="sync-recovery-result" class="settings-note" hidden>
+            <p id="sync-recovery-notice"></p>
+            <input id="sync-recovery-key" type="text" readonly aria-label="Recovery key" />
+          </div>
+          <div class="setting-row">
+            <button id="sync-now" type="button">Sync now</button>
+            <button id="sync-revoke" type="button">Revoke this device</button>
+            <button id="sync-disable" type="button">Disable sync</button>
+          </div>
+        </div></div>
+      </div>
+
+      <div class="acc-group">
         <button class="acc-head">Network <span class="chev">&#8964;</span></button>
         <div class="acc-body"><div class="acc-inner">
           <div class="setting-row">

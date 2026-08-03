@@ -15,6 +15,12 @@ use crate::model::{
 pub struct HistoryKey([u8; 32]);
 
 impl HistoryKey {
+    pub fn random_bytes() -> [u8; 32] {
+        let mut bytes = [0_u8; 32];
+        OsRng.fill_bytes(&mut bytes);
+        bytes
+    }
+
     pub fn from_bytes(bytes: [u8; 32]) -> Self {
         Self(bytes)
     }

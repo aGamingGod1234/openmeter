@@ -13,6 +13,12 @@ import {
 } from "./accounts-ui";
 import { privacyStatus, privacyTrayValues } from "./privacy";
 import { browserCorsWarning, normalizeCompatibilitySettings } from "./settings-compatibility";
+import {
+  normalizeSyncSettings,
+  recoveryKeyNotice,
+  renderSyncSummary,
+  type SyncStatus,
+} from "./sync-settings";
 
 // Injected by vite.config.ts at build time, e.g. "0707.1432".
 declare const __BUILD_STAMP__: string;
@@ -79,6 +85,13 @@ interface ProviderSpend {
   trend: number[];
   unpriced: number;
   unpriced_models: string[];
+  daily?: Array<{
+    day: string;
+    cost: number;
+    tokens: number;
+    models: ModelSpend[];
+    unpriced_models: string[];
+  }>;
 }
 
 /// How to get each provider signed in again, for the ⚠ Outdated tooltip.
@@ -163,6 +176,8 @@ interface Config {
   lastSeenVersion: string;
   updateChannel: UpdateChannel;
   allowBrowserCors: boolean;
+  syncEnabled: boolean;
+  syncHubUrl: string;
 }
 
 const ALL_PROVIDERS: [string, string][] = [
@@ -294,6 +309,8 @@ let config: Config = {
   lastSeenVersion: "",
   updateChannel: "stable",
   allowBrowserCors: false,
+  syncEnabled: false,
+  syncHubUrl: "http://100.90.87.7:6740",
 };
 let lastFetch = 0;
 let refreshing = false;
@@ -2595,9 +2612,104 @@ function populatePinnedOptions(): void {
   }
 }
 
+async function loadSyncStatus(): Promise<SyncStatus> {
+  const status = await invoke<SyncStatus>("sync_status");
+  config.syncEnabled = status.enabled;
+  config.syncHubUrl = status.hub_url;
+  document.querySelector<HTMLInputElement>("#sync-hub-url")!.value = status.hub_url;
+  document.querySelector<HTMLElement>("#sync-summary")!.textContent = renderSyncSummary(status);
+  document.querySelector<HTMLElement>("#sync-device-list")!.textContent = status.device_id
+    ? `Devices: ${status.device_id} (this PC)`
+    : "No enrolled devices on this PC.";
+  document.querySelector<HTMLButtonElement>("#sync-now")!.disabled = !status.enabled;
+  document.querySelector<HTMLButtonElement>("#sync-revoke")!.disabled = !status.device_id;
+  document.querySelector<HTMLButtonElement>("#sync-disable")!.disabled = !status.enabled;
+  return status;
+}
+
+async function initSyncSettings(): Promise<void> {
+  const statusLine = document.querySelector<HTMLElement>("#status")!;
+  document.querySelector<HTMLElement>("#sync-recovery-notice")!.textContent = recoveryKeyNotice();
+  await loadSyncStatus().catch((error) => {
+    document.querySelector<HTMLElement>("#sync-summary")!.textContent = `Sync unavailable: ${error}`;
+  });
+
+  document.querySelector<HTMLButtonElement>("#sync-enroll")!.addEventListener("click", async () => {
+    const input = document.querySelector<HTMLInputElement>("#sync-enrollment-token")!;
+    try {
+      const result = await invoke<{ status: SyncStatus; recovery_key: string | null }>("sync_enroll", {
+        token: input.value,
+      });
+      input.value = "";
+      if (result.recovery_key) {
+        const recovery = document.querySelector<HTMLElement>("#sync-recovery-result")!;
+        recovery.hidden = false;
+        document.querySelector<HTMLInputElement>("#sync-recovery-key")!.value = result.recovery_key;
+      }
+      statusLine.textContent = "Sync device enrolled";
+      await loadSyncStatus();
+    } catch (error) {
+      statusLine.textContent = `Enrollment failed: ${error}`;
+    }
+  });
+
+  document
+    .querySelector<HTMLButtonElement>("#sync-import-recovery")!
+    .addEventListener("click", async () => {
+      const input = document.querySelector<HTMLInputElement>("#sync-recovery-import")!;
+      try {
+        await invoke("sync_import_recovery", { recoveryKey: input.value });
+        input.value = "";
+        statusLine.textContent = "Recovery key imported into Windows Credential Manager";
+        await loadSyncStatus();
+      } catch (error) {
+        statusLine.textContent = `Recovery key import failed: ${error}`;
+      }
+    });
+
+  document.querySelector<HTMLButtonElement>("#sync-now")!.addEventListener("click", async () => {
+    statusLine.textContent = "Syncing encrypted history…";
+    try {
+      await invoke("sync_now");
+      await loadSyncStatus();
+      await refresh(true);
+      statusLine.textContent = "Encrypted history synchronized";
+    } catch (error) {
+      statusLine.textContent = `Sync failed: ${error}`;
+    }
+  });
+
+  document.querySelector<HTMLButtonElement>("#sync-revoke")!.addEventListener("click", async () => {
+    const current = await loadSyncStatus();
+    if (!current.device_id || !window.confirm("Revoke this PC and remove its local sync keys?")) return;
+    try {
+      await invoke("sync_revoke_device", { deviceId: current.device_id });
+      statusLine.textContent = "This sync device was revoked";
+      await loadSyncStatus();
+    } catch (error) {
+      statusLine.textContent = `Revoke failed: ${error}`;
+    }
+  });
+
+  document.querySelector<HTMLButtonElement>("#sync-disable")!.addEventListener("click", async () => {
+    if (!window.confirm("Disable sync and remove local sync keys from Windows Credential Manager?")) return;
+    try {
+      await invoke("sync_disable");
+      document.querySelector<HTMLElement>("#sync-recovery-result")!.hidden = true;
+      document.querySelector<HTMLInputElement>("#sync-recovery-key")!.value = "";
+      statusLine.textContent = "Sync disabled";
+      await loadSyncStatus();
+      await refresh(true);
+    } catch (error) {
+      statusLine.textContent = `Disable sync failed: ${error}`;
+    }
+  });
+}
+
 async function initSettings(): Promise<void> {
   config = await invoke<Config>("get_config");
   Object.assign(config, normalizeCompatibilitySettings(config));
+  Object.assign(config, normalizeSyncSettings(config));
   if (["today", "yesterday", "last30"].includes(config.spendTab)) {
     spendTab = config.spendTab;
   }
@@ -2741,6 +2853,7 @@ async function initSettings(): Promise<void> {
 
   populatePinnedOptions();
   await loadAccounts();
+  await initSyncSettings();
 }
 
 // ---------------------------------------------------------------------------
