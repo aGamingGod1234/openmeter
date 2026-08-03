@@ -23,6 +23,9 @@ if ($installer -notmatch '-RemoteAddress\s+[''\"]?100\.64\.0\.0/10') { throw 'Fi
 if ($installer -match 'RandomNumberGenerator\]::Fill' -or $liveTest -match 'RandomNumberGenerator\]::Fill') {
     throw 'Hub scripts must support inbox Windows PowerShell cryptography APIs'
 }
+if ($installer -notmatch 'sc\.exe create \$ServiceName ''binPath='' \$serviceCommand') {
+    throw 'SCM options and values must be passed as separate PowerShell arguments'
+}
 
 if ($StaticOnly) { exit 0 }
 
