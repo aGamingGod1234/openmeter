@@ -23,14 +23,14 @@ if ($installer -notmatch '-RemoteAddress\s+[''\"]?100\.64\.0\.0/10') { throw 'Fi
 if ($installer -match 'RandomNumberGenerator\]::Fill' -or $liveTest -match 'RandomNumberGenerator\]::Fill') {
     throw 'Hub scripts must support inbox Windows PowerShell cryptography APIs'
 }
-if ($installer -notmatch 'sc\.exe create \$ServiceName ''binPath='' \$serviceCommand') {
-    throw 'SCM options and values must be passed as separate PowerShell arguments'
+if ($installer -notmatch '\[wmiclass\]''Win32_Service''' -or $installer -notmatch '\$serviceClass\.Create') {
+    throw 'Service creation must preserve the quoted command through the Windows service API'
 }
 
 if ($StaticOnly) { exit 0 }
 
-$health = Invoke-RestMethod -Uri "$HubUrl/health" -Method Get -TimeoutSec 15
-if ($null -ne $health -and $health.protocol -ne 1) { throw 'Unexpected hub protocol' }
+$health = Invoke-WebRequest -UseBasicParsing -Uri "$HubUrl/health" -Method Get -TimeoutSec 15
+if ($health.StatusCode -ne 204) { throw 'Unexpected hub health response' }
 
 foreach ($path in @($AdminBinary, $DatabasePath, $PepperPath)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing live hub file: $path" }
@@ -81,8 +81,10 @@ if ($afterRestart.Count -ne 1 -or $afterRestart[0].ciphertext -ne $ciphertext) {
 $revoked = Invoke-WebRequest -UseBasicParsing -Uri "$HubUrl/v1/devices/$($first.device_id)" `
     -Method Delete -Headers $firstHeaders -TimeoutSec 15
 if ($revoked.StatusCode -ne 204) { throw 'Device revocation failed.' }
-$afterRevoke = @(Invoke-RestMethod -Uri "$HubUrl/v1/envelopes" -Method Get -Headers $secondHeaders -TimeoutSec 15)
-if ($afterRevoke.Count -ne 0) { throw 'Revoked envelope remains visible.' }
+$afterRevokeResponse = Invoke-WebRequest -UseBasicParsing -Uri "$HubUrl/v1/envelopes" `
+    -Method Get -Headers $secondHeaders -TimeoutSec 15
+$afterRevoke = $afterRevokeResponse.Content | ConvertFrom-Json
+if (@($afterRevoke).Count -ne 0) { throw 'Revoked envelope remains visible.' }
 
 Invoke-WebRequest -UseBasicParsing -Uri "$HubUrl/v1/devices/$($second.device_id)" `
     -Method Delete -Headers $secondHeaders -TimeoutSec 15 | Out-Null

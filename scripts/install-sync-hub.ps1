@@ -42,24 +42,38 @@ if ($LASTEXITCODE -ne 0) { throw 'Could not secure the sync data directory.' }
     'NT AUTHORITY\SYSTEM:F' | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'Could not secure the server pepper.' }
 
-$existing = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
-if ($existing) {
-    if ($existing.Status -ne 'Stopped') {
+$existingController = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+if ($existingController) {
+    if ($existingController.Status -ne 'Stopped') {
         Stop-Service -Name $ServiceName -Force
-        $existing.WaitForStatus('Stopped', [TimeSpan]::FromSeconds(30))
+        $existingController.WaitForStatus('Stopped', [TimeSpan]::FromSeconds(30))
     }
-    & sc.exe delete $ServiceName | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw 'Could not replace the existing sync service.' }
-    Start-Sleep -Seconds 2
 }
 
 $serviceCommand = "`"$InstalledBinary`" service run --bind $BindAddress --database $DatabasePath --pepper-file $PepperPath"
-& sc.exe create $ServiceName 'binPath=' $serviceCommand 'start=' 'delayed-auto' `
-    'obj=' 'NT AUTHORITY\LocalService' | Out-Null
-if ($LASTEXITCODE -ne 0) { throw 'Could not create the sync service.' }
-& sc.exe description $ServiceName 'Stores end-to-end encrypted OpenMeter history envelopes on the private tailnet.' | Out-Null
+$serviceClass = [wmiclass]'Win32_Service'
+$existingService = Get-WmiObject -Class Win32_Service -Filter "Name='$ServiceName'"
+if ($existingService) {
+    $serviceResult = $existingService.Change(
+        $null, $serviceCommand, $null, $null, 'Automatic', $null,
+        'NT AUTHORITY\LocalService', $null, $null, $null, $null
+    )
+} else {
+    $serviceResult = $serviceClass.Create(
+        $ServiceName, 'OpenMeter Sync Hub', $serviceCommand, 16, 1, 'Automatic', $false,
+        'NT AUTHORITY\LocalService', $null, $null, $null, $null
+    )
+}
+if ($serviceResult.ReturnValue -ne 0) {
+    throw "Could not configure the sync service (Win32 error $($serviceResult.ReturnValue))."
+}
+$serviceRegistry = "HKLM:\SYSTEM\CurrentControlSet\Services\$ServiceName"
+Set-ItemProperty -LiteralPath $serviceRegistry -Name DelayedAutoStart -Value 1
+Set-ItemProperty -LiteralPath $serviceRegistry -Name Description `
+    -Value 'Stores end-to-end encrypted OpenMeter history envelopes on the private tailnet.'
 & sc.exe failure $ServiceName 'reset=' '86400' `
     'actions=' 'restart/60000/restart/60000/none/0' | Out-Null
+if ($LASTEXITCODE -ne 0) { throw 'Could not configure service recovery.' }
 
 Remove-NetFirewallRule -DisplayName $FirewallRule -ErrorAction SilentlyContinue
 # RemoteAddress 100.64.0.0/10 is deliberately tailnet-only.
