@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use serde::Serialize;
 use serde_json::{json, Value};
 
+use crate::accounts::AccountRegistry;
 use crate::providers::{Metric, ProviderSnapshot};
 
 pub const LIMITS_SCHEMA: &str = "openusage.limits.v1";
@@ -27,13 +28,35 @@ pub fn serialize_usage(snapshots: &[ProviderSnapshot]) -> Value {
 }
 
 pub fn serialize_limits(snapshots: &[ProviderSnapshot], generated_at: i64) -> Value {
+    serialize_limits_resolved(snapshots, generated_at, None)
+}
+
+pub fn serialize_limits_with_registry(
+    snapshots: &[ProviderSnapshot],
+    generated_at: i64,
+    registry: &AccountRegistry,
+) -> Value {
+    serialize_limits_resolved(snapshots, generated_at, Some(registry))
+}
+
+fn serialize_limits_resolved(
+    snapshots: &[ProviderSnapshot],
+    generated_at: i64,
+    registry: Option<&AccountRegistry>,
+) -> Value {
     let mut providers = BTreeMap::new();
     let mut errors = Vec::new();
 
     for snapshot in snapshots {
         let card_id = card_id(snapshot);
         if snapshot.status == "ok" {
-            providers.insert(card_id.to_string(), limit_provider(snapshot, generated_at));
+            let display_name = registry
+                .map(|registry| registry.resolve_name(card_id, &snapshot.name))
+                .unwrap_or_else(|| snapshot.name.clone());
+            providers.insert(
+                card_id.to_string(),
+                limit_provider(snapshot, generated_at, display_name),
+            );
             if let Some(message) = snapshot.warning.as_deref() {
                 errors.push(WireError {
                     provider_id: card_id.to_string(),
@@ -110,7 +133,11 @@ fn usage_snapshot(snapshot: &ProviderSnapshot) -> Value {
     })
 }
 
-fn limit_provider(snapshot: &ProviderSnapshot, generated_at: i64) -> WireProvider {
+fn limit_provider(
+    snapshot: &ProviderSnapshot,
+    generated_at: i64,
+    display_name: String,
+) -> WireProvider {
     let provider_id = provider_id(snapshot);
     let expires_at = if snapshot.expires_at > 0 {
         snapshot.expires_at
@@ -132,7 +159,7 @@ fn limit_provider(snapshot: &ProviderSnapshot, generated_at: i64) -> WireProvide
     WireProvider {
         provider_id: provider_id.to_string(),
         account_id: account_id(snapshot).to_string(),
-        display_name: snapshot.name.clone(),
+        display_name,
         plan: snapshot.plan.clone(),
         fetched_at: iso8601(snapshot.fetched_at),
         expires_at: iso8601(expires_at),

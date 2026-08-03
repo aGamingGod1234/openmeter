@@ -310,6 +310,37 @@ impl AccountRegistry {
         Ok(before != self.accounts.len())
     }
 
+    pub fn rename(&mut self, card_id: &str, label: &str) -> Result<(), String> {
+        let label = label.trim();
+        if label.is_empty() {
+            return Err("account label cannot be empty".to_string());
+        }
+        let account = self
+            .accounts
+            .iter_mut()
+            .find(|account| account.card_id == card_id)
+            .ok_or_else(|| format!("unknown account card '{card_id}'"))?;
+        account.label = Some(label.to_string());
+        self.validate()
+    }
+
+    pub fn resolve_name(&self, card_id: &str, derived_default: &str) -> String {
+        self.accounts
+            .iter()
+            .find(|account| account.card_id == card_id)
+            .and_then(|account| {
+                account
+                    .label
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|label| !label.is_empty())
+                    .map(|label| {
+                        format!("{} — {label}", provider_display_name(&account.provider_id))
+                    })
+            })
+            .unwrap_or_else(|| derived_default.to_string())
+    }
+
     pub fn match_token(&self, token: &str) -> Vec<&AccountContext> {
         self.accounts
             .iter()

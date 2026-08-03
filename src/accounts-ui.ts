@@ -3,10 +3,14 @@ export interface AccountRecord {
   account_id: string;
   card_id: string;
   display_name: string;
-  source:
-    | { kind: "default_home" }
-    | { kind: "directory"; path: string }
-    | { kind: "manual" };
+  identity_key?: string;
+  label?: string;
+  sources: Array<{
+    id: string;
+    kind: "default_home" | "directory" | "manual";
+    path?: string;
+    holds_default_source: boolean;
+  }>;
   enabled: boolean;
 }
 
@@ -40,8 +44,16 @@ export function createNamedAccount(
     provider_id: providerId,
     account_id: normalized,
     card_id: `${providerId}--${normalized}`,
-    display_name: `${providerDisplayName(providerId)} — ${cleanLabel}`,
-    source: { kind: "directory", path: cleanDirectory },
+    display_name: providerDisplayName(providerId),
+    label: cleanLabel,
+    sources: [
+      {
+        id: `${providerId}-${normalized}`,
+        kind: "directory",
+        path: cleanDirectory,
+        holds_default_source: false,
+      },
+    ],
     enabled: true,
   };
 }
@@ -51,10 +63,20 @@ export function renameAccount(account: AccountRecord, label: string): AccountRec
   if (!cleanLabel) throw new Error("Enter an account name");
   return {
     ...account,
-    display_name: `${providerDisplayName(account.provider_id)} — ${cleanLabel}`,
+    label: cleanLabel,
   };
 }
 
+export function resolvedAccountName(account: AccountRecord): string {
+  const base = providerDisplayName(account.provider_id);
+  const label = account.label?.trim();
+  return label ? `${base} — ${label}` : base;
+}
+
 export function accountLabel(account: AccountRecord): string {
-  return account.display_name.split("—").slice(1).join("—").trim() || account.account_id;
+  return (
+    account.label?.trim() ||
+    account.display_name.split("—").slice(1).join("—").trim() ||
+    account.account_id
+  );
 }

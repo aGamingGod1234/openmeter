@@ -19,10 +19,14 @@ describe("multi-account settings", () => {
     );
     expect(account.account_id).toBe("work-account");
     expect(account.card_id).toBe("claude--work-account");
-    expect(account.source).toEqual({
-      kind: "directory",
-      path: "D:\\AI\\claude-work",
-    });
+    expect(account.sources).toEqual([
+      {
+        id: "claude-work-account",
+        kind: "directory",
+        path: "D:\\AI\\claude-work",
+        holds_default_source: false,
+      },
+    ]);
 
     const renamed = renameAccount(account, "Company");
     expect(renamed.card_id).toBe(account.card_id);
