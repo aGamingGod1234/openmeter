@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
-import type { Metric, Snapshot } from "./models";
+import type { Metric, Snapshot, UpdateChannel } from "./models";
 import { snapshotProviderId } from "./models";
 import type { Layout, ProviderLayout } from "./layout";
 import { migrateLayout, snapshotCardId } from "./layout";
@@ -12,6 +12,7 @@ import {
   type AccountRecord,
 } from "./accounts-ui";
 import { privacyStatus, privacyTrayValues } from "./privacy";
+import { browserCorsWarning, normalizeCompatibilitySettings } from "./settings-compatibility";
 
 // Injected by vite.config.ts at build time, e.g. "0707.1432".
 declare const __BUILD_STAMP__: string;
@@ -160,6 +161,8 @@ interface Config {
   showTotalSpend: boolean;
   welcomeDismissed: boolean;
   lastSeenVersion: string;
+  updateChannel: UpdateChannel;
+  allowBrowserCors: boolean;
 }
 
 const ALL_PROVIDERS: [string, string][] = [
@@ -289,6 +292,8 @@ let config: Config = {
   showTotalSpend: true,
   welcomeDismissed: false,
   lastSeenVersion: "",
+  updateChannel: "stable",
+  allowBrowserCors: false,
 };
 let lastFetch = 0;
 let refreshing = false;
@@ -2592,6 +2597,7 @@ function populatePinnedOptions(): void {
 
 async function initSettings(): Promise<void> {
   config = await invoke<Config>("get_config");
+  Object.assign(config, normalizeCompatibilitySettings(config));
   if (["today", "yesterday", "last30"].includes(config.spendTab)) {
     spendTab = config.spendTab;
   }
@@ -2712,6 +2718,26 @@ async function initSettings(): Promise<void> {
   };
   proxyEnabled.addEventListener("change", saveProxy);
   proxyUrl.addEventListener("change", saveProxy);
+
+  document.querySelectorAll<HTMLInputElement>('input[name="update-channel"]').forEach((radio) => {
+    radio.checked = radio.value === config.updateChannel;
+    radio.addEventListener("change", () => {
+      if (radio.checked) {
+        void patchConfig({ updateChannel: radio.value as UpdateChannel });
+      }
+    });
+  });
+
+  const browserCors = document.querySelector<HTMLInputElement>("#allow-browser-cors")!;
+  browserCors.checked = config.allowBrowserCors;
+  document.querySelector<HTMLElement>("#browser-cors-warning")!.textContent = browserCorsWarning();
+  browserCors.addEventListener("change", () => {
+    void patchConfig({ allowBrowserCors: browserCors.checked }).then(() => {
+      document.querySelector("#status")!.textContent = browserCors.checked
+        ? "Browser compatibility enabled"
+        : "Browser compatibility disabled";
+    });
+  });
 
   populatePinnedOptions();
   await loadAccounts();

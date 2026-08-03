@@ -72,11 +72,13 @@ and window length where available.
   reach it.
 - **Usage numbers only.** Snapshots of what the dashboard shows — never
   credentials, tokens, or keys.
-- **No CORS headers.** Unlike the macOS app (which sends
-  `Access-Control-Allow-Origin: *` and documents that any web page can
-  read your usage), OpenMeter sends no CORS headers — so browsers block web
-  pages from reading this API. PowerShell, curl, Rainmeter, and native
-  apps are unaffected; CORS only constrains browsers.
+- **Browser access is off by default.** OpenMeter normally sends no CORS
+  headers, so web pages cannot read the API. PowerShell, curl, Rainmeter, and
+  native apps are unaffected. To match the macOS compatibility behavior,
+  enable **Settings → Advanced → Allow browser pages to read local API**.
+  This sends `Access-Control-Allow-Origin: *`, which means any web page you
+  visit can read the usage numbers shown by OpenMeter. Credentials and tokens
+  are never served.
 - **No authentication.** Any program running as your Windows user can
   read this API — that is what makes zero-config widgets and scripts
   possible, and it is a deliberate trade-off. What such a program gets is

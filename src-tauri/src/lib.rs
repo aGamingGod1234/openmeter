@@ -12,6 +12,7 @@ mod pricing;
 pub mod providers;
 pub mod spend;
 mod telemetry;
+pub mod updates;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -135,6 +136,8 @@ fn config_with_defaults(mut cfg: Value) -> Value {
     // own default kept transmitting — a switch that displays off while
     // data flows is the one state a privacy control must never be in.
     obj.entry("telemetry").or_insert(json!(false));
+    obj.entry("updateChannel").or_insert(json!("stable"));
+    obj.entry("allowBrowserCors").or_insert(json!(false));
     cfg
 }
 
@@ -175,6 +178,8 @@ const CONFIG_KEYS: &[&str] = &[
     "welcomeDismissed",
     "lastSeenVersion",
     "telemetry",
+    "updateChannel",
+    "allowBrowserCors",
 ];
 
 #[tauri::command]
@@ -201,6 +206,12 @@ fn set_config(patch: Value) -> Result<Value, String> {
     std::fs::write(&tmp, serde_json::to_string_pretty(&cfg).unwrap_or_default())
         .map_err(|e| format!("write config: {e}"))?;
     std::fs::rename(&tmp, &path).map_err(|e| format!("replace config: {e}"))?;
+    httpapi::set_policy(httpapi::ApiPolicy {
+        allow_browser_cors: cfg
+            .get("allowBrowserCors")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+    });
     Ok(cfg)
 }
 
@@ -810,11 +821,11 @@ fn build_updater(
     app: &tauri::AppHandle,
 ) -> Result<tauri_plugin_updater::Updater, String> {
     use tauri_plugin_updater::UpdaterExt;
-    let endpoints = vec![
-        "https://github.com/aGamingGod1234/openmeter/releases/latest/download/latest.json"
-            .parse()
-            .map_err(|e| format!("endpoint parse: {e}"))?,
-    ];
+    let config = config_with_defaults(load_config());
+    let channel = updates::UpdateChannel::from_config(
+        config.get("updateChannel").and_then(Value::as_str),
+    );
+    let endpoints = vec![updates::update_endpoint(channel)];
     app.updater_builder()
         .endpoints(endpoints)
         .map_err(|e| e.to_string())?
@@ -1017,6 +1028,13 @@ pub fn run() {
                 set_webview_memory_level(&wv, true);
             }
 
+            let config = config_with_defaults(load_config());
+            httpapi::set_policy(httpapi::ApiPolicy {
+                allow_browser_cors: config
+                    .get("allowBrowserCors")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+            });
             httpapi::start();
 
             let saved_shortcut = load_config()

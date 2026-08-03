@@ -1,6 +1,6 @@
 //! Loopback-only, read-only OpenUsage-compatible HTTP API.
 
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 use serde_json::{json, Value};
@@ -11,6 +11,11 @@ use crate::contracts::{serialize_limits_with_registry, serialize_usage_with_regi
 use crate::providers::ProviderSnapshot;
 
 const DEFAULT_MAX_IN_FLIGHT: usize = 16;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ApiPolicy {
+    pub allow_browser_cors: bool,
+}
 
 #[derive(Debug, Clone)]
 pub struct RouteResponse {
@@ -40,6 +45,7 @@ pub struct ApiState {
     published: Mutex<PublishedState>,
     in_flight: AtomicUsize,
     max_in_flight: usize,
+    allow_browser_cors: AtomicBool,
 }
 
 impl ApiState {
@@ -53,7 +59,13 @@ impl ApiState {
             published: Mutex::new(PublishedState::default()),
             in_flight: AtomicUsize::new(0),
             max_in_flight,
+            allow_browser_cors: AtomicBool::new(false),
         }
+    }
+
+    pub fn set_policy(&self, policy: ApiPolicy) {
+        self.allow_browser_cors
+            .store(policy.allow_browser_cors, Ordering::Release);
     }
 
     pub fn publish(&self, snapshots: &[ProviderSnapshot], generated_at: i64) {
@@ -64,6 +76,20 @@ impl ApiState {
     }
 
     pub fn route(&self, method: &Method, url: &str) -> RouteResponse {
+        let mut response = self.route_without_policy(method, url);
+        if self.allow_browser_cors.load(Ordering::Acquire) {
+            response
+                .headers
+                .push(("Access-Control-Allow-Origin".to_string(), "*".to_string()));
+            response.headers.push((
+                "Access-Control-Allow-Methods".to_string(),
+                "GET, OPTIONS".to_string(),
+            ));
+        }
+        response
+    }
+
+    fn route_without_policy(&self, method: &Method, url: &str) -> RouteResponse {
         let Some(_permit) = self.try_acquire() else {
             return RouteResponse::json(503, json!({"error": "server_busy"}));
         };
@@ -207,6 +233,10 @@ pub fn publish(snapshots: &[ProviderSnapshot]) {
     global().publish(snapshots, chrono::Utc::now().timestamp_millis());
 }
 
+pub fn set_policy(policy: ApiPolicy) {
+    global().set_policy(policy);
+}
+
 /// Binds only to `127.0.0.1:6736` and serves until the app exits. If the port
 /// is occupied, the API is unavailable for that session and the app continues.
 pub fn start() {
@@ -238,7 +268,5 @@ fn respond(request: tiny_http::Request) {
             response.add_header(header);
         }
     }
-    // Deliberately no Access-Control-Allow-Origin header. Native clients can
-    // read this loopback API; arbitrary websites cannot.
     let _ = request.respond(response);
 }

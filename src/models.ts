@@ -27,6 +27,7 @@ export interface Snapshot {
 }
 
 export type { AccountRecord } from "./accounts-ui";
+export type UpdateChannel = "stable" | "beta";
 
 export function snapshotProviderId(snapshot: Snapshot): string {
   return snapshot.provider_id?.trim() || snapshot.id;

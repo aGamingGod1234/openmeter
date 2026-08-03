@@ -215,6 +215,29 @@
       </div>
 
       <div class="acc-group">
+        <button class="acc-head">Updates <span class="chev">&#8964;</span></button>
+        <div class="acc-body"><div class="acc-inner">
+          <div class="setting-row">
+            <label class="toggle"><input name="update-channel" value="stable" type="radio" /> Stable releases</label>
+          </div>
+          <div class="setting-row">
+            <label class="toggle"><input name="update-channel" value="beta" type="radio" /> Beta releases</label>
+          </div>
+          <p class="settings-note">Beta receives preview builds and also upgrades to newer stable releases.</p>
+        </div></div>
+      </div>
+
+      <div class="acc-group">
+        <button class="acc-head">Advanced <span class="chev">&#8964;</span></button>
+        <div class="acc-body"><div class="acc-inner">
+          <div class="setting-row">
+            <label class="toggle"><input id="allow-browser-cors" type="checkbox" /> Allow browser pages to read local API</label>
+          </div>
+          <p class="settings-note" id="browser-cors-warning"></p>
+        </div></div>
+      </div>
+
+      <div class="acc-group">
         <button class="acc-head">Accounts <span class="chev">&#8964;</span></button>
         <div class="acc-body"><div class="acc-inner">
           <p class="settings-note">
