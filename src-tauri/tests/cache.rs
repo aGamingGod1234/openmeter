@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use openmeter_lib::accounts::AccountContext;
+use openmeter_lib::accounts::{AccountContext, AccountSource};
 use openmeter_lib::cache::SnapshotCache;
 use openmeter_lib::providers::{Metric, ProviderSnapshot};
 
@@ -25,6 +25,36 @@ fn account_and_credential_stamps_isolate_fresh_entries() {
             .used_percent,
         Some(40.0)
     );
+}
+
+#[test]
+fn stable_account_identity_rejects_a_cache_entry_from_a_reassigned_card() {
+    let original = AccountContext::identified(
+        "claude",
+        "organization:personal",
+        Some("Personal"),
+        AccountSource::default_home("claude-home"),
+    )
+    .unwrap();
+    let replacement = AccountContext::identified(
+        "claude",
+        "organization:company",
+        Some("Company"),
+        AccountSource::default_home("claude-home"),
+    )
+    .unwrap();
+    let mut cache = SnapshotCache::default();
+    cache.insert(snapshot(&original, "same-credential", 1_000, 2_000, 25.0));
+
+    assert!(cache
+        .fresh_for_account(&original, "same-credential", 1_500)
+        .is_some());
+    assert!(cache
+        .fresh_for_account(&replacement, "same-credential", 1_500)
+        .is_none());
+    assert!(cache
+        .last_good_for_account(&replacement, "same-credential")
+        .is_none());
 }
 
 #[test]
