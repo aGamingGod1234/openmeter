@@ -15,7 +15,7 @@ if ($installer -match '0\.0\.0\.0|AnyAddress|OneDrive') { throw 'Unsafe hub bind
 if ($installer -notmatch 'OpenMeterSyncHub') { throw 'Stable service identity missing' }
 if ($installer -notmatch 'NT AUTHORITY\\LocalService') { throw 'Service must run as LocalService' }
 if ($installer -notmatch 'C:\\ProgramData\\OpenMeterSync') { throw 'ProgramData storage path missing' }
-if ($installer -notmatch 'RemoteAddress\s+100\.64\.0\.0/10') { throw 'Firewall must be tailnet-scoped' }
+if ($installer -notmatch '-RemoteAddress\s+[''\"]?100\.64\.0\.0/10') { throw 'Firewall must be tailnet-scoped' }
 
 if ($StaticOnly) { exit 0 }
 

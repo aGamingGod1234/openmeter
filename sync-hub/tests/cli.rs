@@ -40,7 +40,11 @@ fn enrollment_cli_creates_a_single_use_token_for_the_exact_tailnet_database() {
         .output()
         .unwrap();
 
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let token = String::from_utf8(output.stdout).unwrap();
     assert!(token.trim().len() >= 40);
     assert!(database.exists());

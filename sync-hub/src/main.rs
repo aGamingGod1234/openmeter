@@ -9,6 +9,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use openmeter_sync_hub::{router, Hub, Store};
 
+mod service;
+
 #[tokio::main]
 async fn main() {
     if let Err(error) = run().await {
@@ -30,10 +32,25 @@ async fn run() -> Result<(), Box<dyn Error>> {
         [group, command, rest @ ..] if group == "device" && command == "revoke" => {
             revoke_device(parse_options(rest)?)
         }
+        [group, command, rest @ ..] if group == "service" && command == "run" => {
+            run_service(parse_options(rest)?)
+        }
         _ => Err(cli_error(
-            "usage: openmeter-sync-hub <serve|enrollment create|device list|device revoke> [options]",
+            "usage: openmeter-sync-hub <serve|service run|enrollment create|device list|device revoke> [options]",
         )),
     }
+}
+
+fn run_service(options: BTreeMap<String, String>) -> Result<(), Box<dyn Error>> {
+    let bind: SocketAddr = required(&options, "--bind")?.parse()?;
+    validate_bind(bind)?;
+    let database = required(&options, "--database")?.into();
+    let pepper = read_pepper(required(&options, "--pepper-file")?)?;
+    service::run(service::ServiceConfig {
+        bind,
+        database,
+        pepper,
+    })
 }
 
 async fn serve(options: BTreeMap<String, String>) -> Result<(), Box<dyn Error>> {
