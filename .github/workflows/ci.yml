@@ -27,7 +27,9 @@ jobs:
             src-tauri/src/refresh.rs `
             src-tauri/src/bin/openmeter.rs
       - name: Run Clippy
-        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+        run: |
+          cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+          cargo clippy --manifest-path crates/openmeter-sync-protocol/Cargo.toml --all-targets -- -D warnings
       - name: Run Rust tests
         run: |
           cargo test --manifest-path src-tauri/Cargo.toml --all-targets
