@@ -36,6 +36,9 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           .\scripts\test-install-script.ps1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Check OpenUsage parity matrix
+        shell: pwsh
+        run: .\scripts\test-parity-matrix.ps1
       - name: Run Clippy
         shell: pwsh
         run: |
