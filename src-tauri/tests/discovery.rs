@@ -63,8 +63,8 @@ fn codex_requires_a_non_secret_account_claim_and_honors_captured_codex_home() {
     assert_eq!(found.len(), 1);
     assert_eq!(found[0].provider_id, "codex");
     assert_eq!(found[0].identity_key, "acct-work");
-    assert_eq!(found[0].source.kind, AccountSourceKind::Directory);
-    assert!(!found[0].source.holds_default_source);
+    assert_eq!(found[0].source.kind, AccountSourceKind::DefaultHome);
+    assert!(found[0].source.holds_default_source);
 
     let _ = std::fs::remove_dir_all(home);
 }
