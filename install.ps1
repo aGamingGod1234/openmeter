@@ -47,6 +47,27 @@ if ($actual -ne $expected.ToLower()) {
 }
 Write-Host '> SHA-256 verified.'
 
+$publisherMatch = [regex]::Match(
+    [string]$release.body,
+    'Authenticode publisher: `([^`]+)`'
+)
+if (-not $publisherMatch.Success) {
+    Remove-Item $dest -Force -ErrorAction SilentlyContinue
+    throw 'Release does not declare its Authenticode publisher - not installing.'
+}
+$expectedPublisher = $publisherMatch.Groups[1].Value
+$signature = Get-AuthenticodeSignature -LiteralPath $dest
+if ($signature.Status -ne 'Valid' -or -not $signature.TimeStamperCertificate) {
+    Remove-Item $dest -Force -ErrorAction SilentlyContinue
+    throw 'Installer Authenticode signature is invalid or not timestamped - not installing.'
+}
+if (-not $signature.SignerCertificate -or
+    $signature.SignerCertificate.Subject -notlike "*$expectedPublisher*") {
+    Remove-Item $dest -Force -ErrorAction SilentlyContinue
+    throw 'Installer publisher does not match the release declaration.'
+}
+Write-Host '> Authenticode publisher and timestamp verified.'
+
 Write-Host '> Installing (per-user, no admin needed)...'
 Get-Process -Name openmeter-tray, openmeter -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 Start-Sleep -Milliseconds 500

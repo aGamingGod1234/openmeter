@@ -10,6 +10,9 @@ $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
 if ($config.bundle.resources) {
     throw 'Release-only resources must not break ordinary Cargo builds.'
 }
+if ($config.mainBinaryName -ne 'openmeter-tray') {
+    throw 'The signed tray executable must remain the Tauri main binary.'
+}
 $cargo = Get-Content -LiteralPath $cargoPath -Raw
 if ($cargo -notmatch '(?m)^default-run\s*=\s*"openmeter-tray"\s*$') {
     throw 'Cargo must explicitly select the tray binary as Tauri main.'
@@ -34,11 +37,11 @@ if ($config.build.beforeDevCommand -ne 'npm run dev') {
 }
 
 $workflow = Get-Content -LiteralPath $workflowPath -Raw
-if ($workflow -notmatch '(?ms)- name: Build \(signed\).*?working-directory: src-tauri') {
-    throw 'The signed build must run from src-tauri so all resource consumers share one base directory.'
+if ($workflow -notmatch '(?ms)- name: Bundle NSIS.*?working-directory: src-tauri') {
+    throw 'The bundle-only command must run from src-tauri.'
 }
-if ($workflow -notmatch [regex]::Escape('..\node_modules\.bin\tauri.cmd build --bundles nsis --config tauri.bundle.conf.json')) {
-    throw 'The signed build must invoke the repository-local Tauri CLI.'
+if ($workflow -notmatch [regex]::Escape('..\node_modules\.bin\tauri.cmd bundle --no-sign --bundles nsis --config tauri.bundle.conf.json')) {
+    throw 'The workflow must bundle without rebuilding signed inner binaries.'
 }
 if ($workflow -notmatch [regex]::Escape('.\scripts\prepare-bundle.ps1')) {
     throw 'The workflow must stage inputs for both Tauri path bases.'
@@ -53,6 +56,7 @@ try {
     Set-Content -LiteralPath $cli -Value 'fake-cli' -Encoding Ascii
     Set-Content -LiteralPath $pathHelper -Value '# path helper' -Encoding Ascii
     Set-Content -LiteralPath $hooks -Value '; hooks' -Encoding Ascii
+    $before = (Get-FileHash -LiteralPath $cli -Algorithm SHA256).Hash
 
     & $builder -RepositoryRoot $fixture
 
@@ -61,6 +65,10 @@ try {
             $staged = Join-Path $base "bundle-inputs\$name"
             if (-not (Test-Path -LiteralPath $staged -PathType Leaf)) {
                 throw "Missing staged input: $staged"
+            }
+            if ($name -eq 'openmeter.exe' -and
+                (Get-FileHash -LiteralPath $staged -Algorithm SHA256).Hash -ne $before) {
+                throw 'Bundle staging mutated the signed CLI.'
             }
         }
     }

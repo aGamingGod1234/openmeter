@@ -69,16 +69,127 @@ jobs:
       - name: Build bundled CLI
         run: cargo build --manifest-path src-tauri/Cargo.toml --release --bin openmeter
 
+      - name: Build release binaries without bundling
+        working-directory: src-tauri
+        run: ..\node_modules\.bin\tauri.cmd build --no-bundle
+
       - name: Build sync hub
         run: cargo build --manifest-path sync-hub/Cargo.toml --release
 
-      - name: Stage bundle inputs
+      - name: Preflight Microsoft Trusted Signing configuration
+        shell: pwsh
+        env:
+          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          ARTIFACT_SIGNING_ENDPOINT: ${{ vars.ARTIFACT_SIGNING_ENDPOINT }}
+          ARTIFACT_SIGNING_ACCOUNT: ${{ vars.ARTIFACT_SIGNING_ACCOUNT }}
+          ARTIFACT_SIGNING_PROFILE: ${{ vars.ARTIFACT_SIGNING_PROFILE }}
+          AUTHENTICODE_PUBLISHER: ${{ vars.AUTHENTICODE_PUBLISHER }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($name in @(
+            'AZURE_CLIENT_ID', 'AZURE_TENANT_ID', 'AZURE_SUBSCRIPTION_ID',
+            'ARTIFACT_SIGNING_ENDPOINT', 'ARTIFACT_SIGNING_ACCOUNT',
+            'ARTIFACT_SIGNING_PROFILE', 'AUTHENTICODE_PUBLISHER'
+          )) {
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
+              throw "Required release variable '$name' is not configured."
+            }
+          }
+
+      - name: Stage inner executables for signing
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force signing-inputs | Out-Null
+          Copy-Item src-tauri/target/release/openmeter-tray.exe signing-inputs/openmeter-tray.exe
+          Copy-Item src-tauri/target/release/openmeter.exe signing-inputs/openmeter.exe
+          Copy-Item sync-hub/target/release/openmeter-sync-hub.exe signing-inputs/openmeter-sync-hub.exe
+
+      - name: Azure login
+        uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Sign inner executables
+        uses: azure/artifact-signing-action@v2
+        with:
+          endpoint: ${{ vars.ARTIFACT_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.ARTIFACT_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.ARTIFACT_SIGNING_PROFILE }}
+          files-folder: ${{ github.workspace }}\signing-inputs
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      - name: Verify and restore signed inner executables
+        shell: pwsh
+        env:
+          AUTHENTICODE_PUBLISHER: ${{ vars.AUTHENTICODE_PUBLISHER }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($name in 'openmeter-tray.exe','openmeter.exe','openmeter-sync-hub.exe') {
+            .\scripts\test-authenticode.ps1 -Path "signing-inputs\$name" -ExpectedPublisher $env:AUTHENTICODE_PUBLISHER
+          }
+          Copy-Item signing-inputs/openmeter-tray.exe src-tauri/target/release/openmeter-tray.exe -Force
+          Copy-Item signing-inputs/openmeter.exe src-tauri/target/release/openmeter.exe -Force
+          Copy-Item signing-inputs/openmeter-sync-hub.exe sync-hub/target/release/openmeter-sync-hub.exe -Force
+
+      - name: Stage signed bundle inputs
         shell: pwsh
         run: .\scripts\prepare-bundle.ps1
 
-      - name: Build (signed)
+      - name: Bundle NSIS
         working-directory: src-tauri
-        run: ..\node_modules\.bin\tauri.cmd build --bundles nsis --config tauri.bundle.conf.json
+        run: ..\node_modules\.bin\tauri.cmd bundle --no-sign --bundles nsis --config tauri.bundle.conf.json
+
+      - name: Verify bundled inner signatures
+        shell: pwsh
+        env:
+          AUTHENTICODE_PUBLISHER: ${{ vars.AUTHENTICODE_PUBLISHER }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installer = Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
+          $extract = Join-Path $env:RUNNER_TEMP 'openmeter-nsis-payload'
+          New-Item -ItemType Directory -Force $extract | Out-Null
+          & 7z.exe x -y "-o$extract" $installer.FullName | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'Could not extract NSIS payload for signature verification.' }
+          $tray = Get-ChildItem $extract -Recurse -Filter openmeter-tray.exe | Select-Object -First 1
+          $cli = Get-ChildItem $extract -Recurse -Filter openmeter.exe | Select-Object -First 1
+          if (-not $tray -or -not $cli) { throw 'Signed inner executables are missing from NSIS.' }
+          .\scripts\test-authenticode.ps1 -Path $tray.FullName -ExpectedPublisher $env:AUTHENTICODE_PUBLISHER
+          .\scripts\test-authenticode.ps1 -Path $cli.FullName -ExpectedPublisher $env:AUTHENTICODE_PUBLISHER
+
+      - name: Sign NSIS installer
+        uses: azure/artifact-signing-action@v2
+        with:
+          endpoint: ${{ vars.ARTIFACT_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.ARTIFACT_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.ARTIFACT_SIGNING_PROFILE }}
+          files-folder: ${{ github.workspace }}\src-tauri\target\release\bundle\nsis
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      - name: Verify signed NSIS installer
+        shell: pwsh
+        env:
+          AUTHENTICODE_PUBLISHER: ${{ vars.AUTHENTICODE_PUBLISHER }}
+        run: |
+          $installer = Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
+          .\scripts\test-authenticode.ps1 -Path $installer.FullName -ExpectedPublisher $env:AUTHENTICODE_PUBLISHER
+
+      - name: Sign final installer for Tauri updater
+        working-directory: src-tauri
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
+          ..\node_modules\.bin\tauri.cmd signer sign $installer.FullName
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -145,6 +256,7 @@ jobs:
           gh release create $env:GITHUB_REF_NAME `
             --title "OpenMeter $($env:GITHUB_REF_NAME.TrimStart('v'))" `
             --generate-notes `
+            --notes "Authenticode publisher: ``${{ vars.AUTHENTICODE_PUBLISHER }}``" `
             $exe.FullName "$($exe.FullName).sig" latest.json SHA256SUMS.txt `
             sync-hub/target/release/openmeter-sync-hub.exe `
             scripts/install-sync-hub.ps1 scripts/uninstall-sync-hub.ps1
