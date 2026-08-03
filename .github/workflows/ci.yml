@@ -27,15 +27,25 @@ jobs:
             src-tauri/src/refresh.rs `
             src-tauri/src/bin/openmeter.rs
       - name: Run Clippy
+        shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
           cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo clippy --manifest-path crates/openmeter-sync-protocol/Cargo.toml --all-targets -- -D warnings
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo clippy --manifest-path sync-hub/Cargo.toml --all-targets -- -D warnings
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Run Rust tests
+        shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
           cargo test --manifest-path src-tauri/Cargo.toml --all-targets
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo test --manifest-path crates/openmeter-sync-protocol/Cargo.toml --all-targets
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo test --manifest-path sync-hub/Cargo.toml --all-targets
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
   frontend:
     runs-on: windows-latest

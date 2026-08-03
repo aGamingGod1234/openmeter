@@ -2,6 +2,7 @@ mod alerts;
 pub mod accounts;
 pub mod cache;
 pub mod contracts;
+pub mod credential_store;
 pub mod discovery;
 pub mod environment;
 pub mod httpapi;
@@ -11,6 +12,7 @@ pub mod redaction;
 mod pricing;
 pub mod providers;
 pub mod spend;
+pub mod sync_client;
 mod telemetry;
 pub mod updates;
 

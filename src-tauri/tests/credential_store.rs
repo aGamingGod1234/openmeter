@@ -19,7 +19,10 @@ fn disposable_windows_credential_round_trips_and_is_deleted() {
     let secret = SecretVec::new(b"disposable-sync-secret".to_vec());
 
     CredentialStore::write(&target, &secret).unwrap();
-    assert_eq!(CredentialStore::read(&target).unwrap().expose(), secret.expose());
+    assert_eq!(
+        CredentialStore::read(&target).unwrap().unwrap().expose(),
+        secret.expose()
+    );
     CredentialStore::delete(&target).unwrap();
     assert!(CredentialStore::read(&target).unwrap().is_none());
 }
