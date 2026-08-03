@@ -1,0 +1,10 @@
+[package]
+name = "openmeter-sync-hub"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+openmeter-sync-protocol = { path = "../crates/openmeter-sync-protocol" }
+rusqlite = { version = "0.32", features = ["bundled"] }
+serde_json = "1"
+thiserror = "2"
