@@ -33,6 +33,11 @@ pub struct AccountUsageEvent {
     pub model: String,
     pub tokens: u64,
     pub carried_cost: Option<f64>,
+    pub input: f64,
+    pub output: f64,
+    pub cache_read: f64,
+    pub cache_write_5m: f64,
+    pub cache_write_1h: f64,
 }
 
 pub fn collect_pi_events(
@@ -120,6 +125,14 @@ fn parse_pi_line(
         return None;
     }
     let usage = message.get("usage")?;
+    let cache_write = usage
+        .get("cacheWrite")
+        .and_then(Value::as_f64)
+        .unwrap_or_default();
+    let cache_write_1h = usage
+        .get("cacheWrite1h")
+        .and_then(Value::as_f64)
+        .unwrap_or_default();
     let timestamp_ms = chrono::DateTime::parse_from_rfc3339(
         document.get("timestamp").and_then(Value::as_str)?,
     )
@@ -147,6 +160,20 @@ fn parse_pi_line(
             .get("cost")
             .and_then(|cost| cost.get("total"))
             .and_then(Value::as_f64),
+        input: usage
+            .get("input")
+            .and_then(Value::as_f64)
+            .unwrap_or_default(),
+        output: usage
+            .get("output")
+            .and_then(Value::as_f64)
+            .unwrap_or_default(),
+        cache_read: usage
+            .get("cacheRead")
+            .and_then(Value::as_f64)
+            .unwrap_or_default(),
+        cache_write_5m: (cache_write - cache_write_1h).max(0.0),
+        cache_write_1h,
     })
 }
 
@@ -180,8 +207,8 @@ pub struct Window {
 
 #[derive(Serialize, Clone)]
 pub struct ProviderSpend {
-    pub id: &'static str,
-    pub name: &'static str,
+    pub id: String,
+    pub name: String,
     pub today: Window,
     pub yesterday: Window,
     pub last30: Window,
@@ -408,15 +435,15 @@ fn finalize_models(raw: HashMap<String, (f64, f64)>, window_cost: f64) -> Vec<Mo
     named
 }
 
-fn build_spend(id: &'static str, name: &'static str, data: FileData) -> ProviderSpend {
+fn build_spend(id: &str, name: &str, data: FileData) -> ProviderSpend {
     let today = Local::now().date_naive().num_days_from_ce();
     let mut unpriced_models: Vec<String> = data.unpriced.keys().cloned().collect();
     unpriced_models.sort();
     unpriced_models.truncate(5);
     let days = data.days;
     let mut sp = ProviderSpend {
-        id,
-        name,
+        id: id.to_string(),
+        name: name.to_string(),
         today: Window::default(),
         yesterday: Window::default(),
         last30: Window::default(),
@@ -1994,4 +2021,120 @@ pub fn collect(cursor_csv: Option<String>) -> Vec<ProviderSpend> {
     }
     save_persisted_cache();
     list.into_iter().filter(ProviderSpend::has_data).collect()
+}
+
+pub fn collect_for_accounts(
+    cursor_csv: Option<String>,
+    registry: &crate::accounts::AccountRegistry,
+    environment: &crate::environment::EnvironmentSnapshot,
+) -> Vec<ProviderSpend> {
+    let mut spend = collect(cursor_csv);
+    let pi_root = pi_sessions_root(environment);
+    for provider_id in ["claude", "codex"] {
+        let Some(owner) = registry.default_owner(provider_id) else {
+            continue;
+        };
+        let events = collect_pi_events(&pi_root, owner);
+        if events.is_empty() {
+            continue;
+        }
+        let mut pi = build_spend(provider_id, &owner.display_name, pi_events_data(events));
+        pi.id = owner.card_id.clone();
+        pi.name = registry.resolve_name(&owner.card_id, &owner.display_name);
+        if let Some(native) = spend.iter_mut().find(|entry| entry.id == provider_id) {
+            merge_provider_spend(native, pi);
+            native.id = owner.card_id.clone();
+            native.name = registry.resolve_name(&owner.card_id, &native.name);
+        } else if pi.has_data() {
+            spend.push(pi);
+        }
+    }
+    spend
+}
+
+fn pi_sessions_root(environment: &crate::environment::EnvironmentSnapshot) -> PathBuf {
+    if let Some(path) = environment.var("PI_CODING_AGENT_SESSION_DIR") {
+        return PathBuf::from(path);
+    }
+    if let Some(path) = environment.var("PI_CODING_AGENT_DIR") {
+        return PathBuf::from(path).join("sessions");
+    }
+    environment.home_dir().join(".pi/agent/sessions")
+}
+
+fn pi_events_data(events: Vec<AccountUsageEvent>) -> FileData {
+    let mut data = FileData::default();
+    for event in events {
+        let Some(timestamp) = DateTime::<Utc>::from_timestamp_millis(event.timestamp_ms) else {
+            continue;
+        };
+        let model = if event.model.is_empty() {
+            "unattributed".to_string()
+        } else {
+            event.model.clone()
+        };
+        let cost = event
+            .carried_cost
+            .filter(|cost| *cost > 0.0)
+            .or_else(|| {
+                let price = pricing::lookup(&event.model)?;
+                Some(pricing::request_cost(
+                    &price,
+                    &pricing::Usage {
+                        input: event.input,
+                        output: event.output,
+                        cache_read: event.cache_read,
+                        cache_write_5m: event.cache_write_5m,
+                        cache_write_1h: event.cache_write_1h,
+                    },
+                    true,
+                ))
+            });
+        if cost.is_none() && !event.model.is_empty() && event.tokens > 0 {
+            *data.unpriced.entry(event.model.clone()).or_insert(0) += 1;
+        }
+        let totals = data
+            .days
+            .entry((day_of_utc(timestamp), model))
+            .or_insert((0.0, 0.0));
+        totals.0 += cost.unwrap_or_default();
+        totals.1 += event.tokens as f64;
+    }
+    data
+}
+
+fn merge_provider_spend(target: &mut ProviderSpend, source: ProviderSpend) {
+    merge_window(&mut target.today, source.today);
+    merge_window(&mut target.yesterday, source.yesterday);
+    merge_window(&mut target.last30, source.last30);
+    for (target_day, source_day) in target.trend.iter_mut().zip(source.trend) {
+        *target_day += source_day;
+    }
+    target.unpriced += source.unpriced;
+    target.unpriced_models.extend(source.unpriced_models);
+    target.unpriced_models.sort();
+    target.unpriced_models.dedup();
+}
+
+fn merge_window(target: &mut Window, source: Window) {
+    target.cost += source.cost;
+    target.tokens += source.tokens;
+    for model in source.models {
+        if let Some(existing) = target
+            .models
+            .iter_mut()
+            .find(|existing| existing.model == model.model)
+        {
+            existing.cost += model.cost;
+            existing.tokens += model.tokens;
+        } else {
+            target.models.push(model);
+        }
+    }
+    target.models.sort_by(|left, right| {
+        right
+            .cost
+            .partial_cmp(&left.cost)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 }

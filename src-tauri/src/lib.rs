@@ -615,7 +615,11 @@ async fn fetch_spend() -> Vec<spend::ProviderSpend> {
     // Cursor's CSV export needs the async client; fetch it here and hand it
     // to the blocking scan.
     let cursor_csv = providers::cursor::fetch_usage_csv().await;
-    let result = tauri::async_runtime::spawn_blocking(move || spend::collect(cursor_csv))
+    let registry = accounts::AccountRegistry::load(&account_registry_path()).unwrap_or_default();
+    let environment = environment::launch_environment().clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        spend::collect_for_accounts(cursor_csv, &registry, &environment)
+    })
         .await
         .unwrap_or_default();
     eprintln!(

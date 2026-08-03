@@ -215,6 +215,16 @@ impl AccountRegistry {
         &self.accounts
     }
 
+    pub fn default_owner(&self, provider_id: &str) -> Option<&AccountContext> {
+        self.accounts.iter().find(|account| {
+            account.provider_id == provider_id
+                && account
+                    .sources
+                    .iter()
+                    .any(|source| source.holds_default_source)
+        })
+    }
+
     pub fn upsert(&mut self, account: AccountContext) -> Result<(), String> {
         if let Some(existing) = self
             .accounts
