@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::sync::Mutex;
 
-use openmeter_sync_protocol::{EncryptedEnvelope, MAX_ENVELOPE_BYTES};
+use openmeter_sync_protocol::{EncryptedEnvelope, MAX_ENVELOPE_BYTES, MAX_ENVELOPE_WIRE_BYTES};
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use thiserror::Error;
 
@@ -176,7 +176,7 @@ impl Store {
             return Err(PutError::InvalidEnvelope);
         }
         let encoded = serde_json::to_vec(envelope).map_err(|_| PutError::InvalidEnvelope)?;
-        if encoded.len() > MAX_ENVELOPE_BYTES + 1024 {
+        if encoded.len() > MAX_ENVELOPE_WIRE_BYTES {
             return Err(PutError::InvalidEnvelope);
         }
         let revision =

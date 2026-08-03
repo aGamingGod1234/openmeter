@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 pub const MAX_ENVELOPE_BYTES: usize = 2 * 1024 * 1024;
+pub const MAX_ENVELOPE_WIRE_BYTES: usize = 4 * MAX_ENVELOPE_BYTES.div_ceil(3) + 4 * 1024;
 pub const MAX_PAYLOAD_BYTES: usize = 8 * 1024 * 1024;
 pub const HISTORY_SCHEMA: &str = "openmeter.history.v1";
 

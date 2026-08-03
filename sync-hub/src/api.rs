@@ -10,7 +10,7 @@ use axum::{Json, Router};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use hmac::{Hmac, Mac};
-use openmeter_sync_protocol::{EncryptedEnvelope, MAX_ENVELOPE_BYTES};
+use openmeter_sync_protocol::{EncryptedEnvelope, MAX_ENVELOPE_WIRE_BYTES};
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -61,7 +61,7 @@ pub fn router(hub: Hub) -> Router {
         .route("/v1/envelopes", get(list_envelopes))
         .route("/v1/devices/{device_id}/envelope", put(put_envelope))
         .route("/v1/devices/{device_id}", delete(revoke_device))
-        .layer(DefaultBodyLimit::max(MAX_ENVELOPE_BYTES))
+        .layer(DefaultBodyLimit::max(MAX_ENVELOPE_WIRE_BYTES))
         .layer(TimeoutLayer::with_status_code(
             StatusCode::REQUEST_TIMEOUT,
             Duration::from_secs(15),

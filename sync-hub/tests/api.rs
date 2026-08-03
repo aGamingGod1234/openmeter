@@ -2,7 +2,9 @@ use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
 use http_body_util::BodyExt;
 use openmeter_sync_hub::{router, Hub, Store};
-use openmeter_sync_protocol::{EncryptedEnvelope, EnvelopeMeta, MAX_ENVELOPE_BYTES};
+use openmeter_sync_protocol::{
+    EncryptedEnvelope, EnvelopeMeta, MAX_ENVELOPE_BYTES, MAX_ENVELOPE_WIRE_BYTES,
+};
 use serde_json::{json, Value};
 use tower::ServiceExt;
 
@@ -57,7 +59,7 @@ async fn oversized_body_is_rejected_before_json_parsing() {
         .method("POST")
         .uri("/v1/enroll")
         .header(header::CONTENT_TYPE, "application/json")
-        .body(Body::from(vec![b'x'; 2 * 1024 * 1024 + 1]))
+        .body(Body::from(vec![b'x'; MAX_ENVELOPE_WIRE_BYTES + 1]))
         .unwrap();
 
     let response = app.oneshot(request).await.unwrap();
