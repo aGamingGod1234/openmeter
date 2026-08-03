@@ -24,7 +24,7 @@ use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use crate::accounts::{AccountContext, AccountSource};
+use crate::accounts::{AccountContext, AccountSourceKind};
 use crate::environment::EnvironmentSnapshot;
 
 pub type ProviderFetchFuture = Pin<Box<dyn Future<Output = ProviderSnapshot> + Send + 'static>>;
@@ -350,7 +350,13 @@ fn account_snapshot(
                 async move { codex::snapshot_for_with_environment(&account, &environment).await },
             )
         }
-        _ if matches!(account.source, AccountSource::DefaultHome) => legacy_snapshot(provider_id),
+        _ if matches!(
+            account.primary_source().map(|source| source.kind),
+            Some(AccountSourceKind::DefaultHome)
+        ) =>
+        {
+            legacy_snapshot(provider_id)
+        }
         _ => Box::pin(async move {
             ProviderSnapshot::no_credentials(
                 &account.card_id,
@@ -419,13 +425,16 @@ fn credential_paths(account: &AccountContext, environment: &EnvironmentSnapshot)
         "kilo" => &[".local/share/kilo/auth.json"],
         _ => &[],
     };
-    match &account.source {
-        AccountSource::Directory { path } => relative.iter().map(|item| path.join(item)).collect(),
-        AccountSource::Manual => vec![
+    let source = account.primary_source();
+    match source.map(|source| (source.kind, source.path.as_ref())) {
+        Some((AccountSourceKind::Directory, Some(path))) => {
+            relative.iter().map(|item| path.join(item)).collect()
+        }
+        Some((AccountSourceKind::Manual, _)) | None => vec![
             config_dir().join(format!("{}.json", account.card_id)),
             config_dir().join(format!("{}.json", account.provider_id)),
         ],
-        AccountSource::DefaultHome => {
+        Some((AccountSourceKind::DefaultHome, _)) => {
             let home = environment.home_dir().to_path_buf();
             let appdata = environment
                 .var("APPDATA")
@@ -439,6 +448,7 @@ fn credential_paths(account: &AccountContext, environment: &EnvironmentSnapshot)
                 ))
                 .collect()
         }
+        Some((AccountSourceKind::Directory, None)) => Vec::new(),
     }
 }
 

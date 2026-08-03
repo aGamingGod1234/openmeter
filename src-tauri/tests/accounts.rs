@@ -4,22 +4,19 @@ use openmeter_lib::accounts::{AccountContext, AccountRegistry, AccountSource};
 
 #[test]
 fn sources_with_the_same_identity_merge_into_one_stable_account() {
-    let mut registry = AccountRegistry::from_accounts(vec![
-        AccountContext::identified(
-            "claude",
-            "organization:acme",
-            Some("Work"),
-            AccountSource::default_home("claude-home"),
-        )
-        .expect("valid discovered account"),
-    ])
+    let mut registry = AccountRegistry::from_accounts(vec![AccountContext::identified(
+        "claude",
+        "organization:acme",
+        Some("Work"),
+        AccountSource::default_home("claude-home"),
+    )
+    .expect("valid discovered account")])
     .unwrap();
 
     registry
         .attach_source(
             "organization:acme",
-            AccountSource::directory("claude-work", PathBuf::from(r"D:\AI\claude-work"))
-                .unwrap(),
+            AccountSource::directory("claude-work", PathBuf::from(r"D:\AI\claude-work")).unwrap(),
         )
         .unwrap();
 

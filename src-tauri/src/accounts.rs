@@ -22,13 +22,55 @@ impl AccountId {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-#[serde(deny_unknown_fields)]
-pub enum AccountSource {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AccountSourceKind {
     DefaultHome,
-    Directory { path: PathBuf },
+    Directory,
     Manual,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AccountSource {
+    pub id: String,
+    pub kind: AccountSourceKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<PathBuf>,
+    #[serde(default)]
+    pub holds_default_source: bool,
+}
+
+impl AccountSource {
+    pub fn default_home(id: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            kind: AccountSourceKind::DefaultHome,
+            path: None,
+            holds_default_source: true,
+        }
+    }
+
+    pub fn directory(id: impl Into<String>, path: PathBuf) -> Result<Self, String> {
+        if path.as_os_str().is_empty() {
+            return Err("account source directory cannot be empty".to_string());
+        }
+        Ok(Self {
+            id: id.into(),
+            kind: AccountSourceKind::Directory,
+            path: Some(path),
+            holds_default_source: false,
+        })
+    }
+
+    pub fn manual(id: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            kind: AccountSourceKind::Manual,
+            path: None,
+            holds_default_source: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -38,7 +80,11 @@ pub struct AccountContext {
     pub account_id: AccountId,
     pub card_id: String,
     pub display_name: String,
-    pub source: AccountSource,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    pub sources: Vec<AccountSource>,
     pub enabled: bool,
 }
 
@@ -50,7 +96,9 @@ impl AccountContext {
             account_id: AccountId("default".to_string()),
             card_id: provider_id.to_string(),
             display_name: provider_display_name(provider_id),
-            source: AccountSource::DefaultHome,
+            identity_key: None,
+            label: None,
+            sources: vec![AccountSource::default_home(format!("{provider_id}-home"))],
             enabled: true,
         })
     }
@@ -70,9 +118,39 @@ impl AccountContext {
             account_id: AccountId(account_id.to_string()),
             card_id: format!("{provider_id}--{account_id}"),
             display_name: format!("{} — {label}", provider_display_name(provider_id)),
-            source: AccountSource::Manual,
+            identity_key: None,
+            label: Some(label.to_string()),
+            sources: vec![AccountSource::manual(format!("{provider_id}-{account_id}"))],
             enabled: true,
         })
+    }
+
+    pub fn identified(
+        provider_id: &str,
+        identity_key: &str,
+        label: Option<&str>,
+        source: AccountSource,
+    ) -> Result<Self, String> {
+        let mut account = Self::default_for(provider_id)?;
+        let identity_key = identity_key.trim();
+        if identity_key.is_empty() {
+            return Err("account identity key cannot be empty".to_string());
+        }
+        let label = label.map(str::trim).filter(|value| !value.is_empty());
+        account.identity_key = Some(identity_key.to_string());
+        account.label = label.map(str::to_string);
+        account.display_name = label
+            .map(|value| format!("{} — {value}", provider_display_name(provider_id)))
+            .unwrap_or_else(|| provider_display_name(provider_id));
+        account.sources = vec![source];
+        Ok(account)
+    }
+
+    pub fn primary_source(&self) -> Option<&AccountSource> {
+        self.sources
+            .iter()
+            .find(|source| source.holds_default_source)
+            .or_else(|| self.sources.first())
     }
 }
 
@@ -115,6 +193,28 @@ impl AccountRegistry {
             *existing = account;
         } else {
             self.accounts.push(account);
+        }
+        self.validate()
+    }
+
+    pub fn attach_source(
+        &mut self,
+        identity_key: &str,
+        source: AccountSource,
+    ) -> Result<(), String> {
+        let account = self
+            .accounts
+            .iter_mut()
+            .find(|account| account.identity_key.as_deref() == Some(identity_key))
+            .ok_or_else(|| format!("unknown account identity '{identity_key}'"))?;
+        if let Some(existing) = account
+            .sources
+            .iter_mut()
+            .find(|existing| existing.id == source.id)
+        {
+            *existing = source;
+        } else {
+            account.sources.push(source);
         }
         self.validate()
     }
@@ -181,6 +281,30 @@ impl AccountRegistry {
                     "duplicate account card id '{}': registry rejected",
                     account.card_id
                 ));
+            }
+            if account.sources.is_empty() {
+                return Err(format!(
+                    "account '{}' must have at least one credential source",
+                    account.card_id
+                ));
+            }
+            let mut source_ids = HashSet::new();
+            for source in &account.sources {
+                if source.id.trim().is_empty() {
+                    return Err(format!(
+                        "account '{}' has an empty source id",
+                        account.card_id
+                    ));
+                }
+                if !source_ids.insert(source.id.as_str()) {
+                    return Err(format!(
+                        "account '{}' has duplicate source id '{}'",
+                        account.card_id, source.id
+                    ));
+                }
+                if source.kind == AccountSourceKind::Directory && source.path.is_none() {
+                    return Err(format!("directory source '{}' has no path", source.id));
+                }
             }
         }
         Ok(())

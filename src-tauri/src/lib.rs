@@ -755,11 +755,11 @@ fn copy_diagnostics(app: tauri::AppHandle) -> Result<(), String> {
                 "accountId": account.account_id.as_str(),
                 "cardId": account.card_id,
                 "enabled": account.enabled,
-                "source": match &account.source {
-                    accounts::AccountSource::DefaultHome => "default_home",
-                    accounts::AccountSource::Directory { .. } => "directory",
-                    accounts::AccountSource::Manual => "manual",
-                },
+                "sources": account.sources.iter().map(|source| json!({
+                    "id": source.id,
+                    "kind": source.kind,
+                    "holdsDefaultSource": source.holds_default_source,
+                })).collect::<Vec<_>>(),
             })
         })
         .collect();

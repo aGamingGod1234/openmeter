@@ -51,7 +51,7 @@ fn directory_accounts_stamp_their_own_credential_bytes() {
     std::fs::write(&credential_file, br#"{"token":"first"}"#).unwrap();
 
     let mut account = AccountContext::named("codex", "work", "Work").unwrap();
-    account.source = AccountSource::Directory { path: root.clone() };
+    account.sources = vec![AccountSource::directory("codex-work", root.clone()).unwrap()];
     let first = account_credential_stamp(&account);
     std::fs::write(&credential_file, br#"{"token":"second"}"#).unwrap();
     let second = account_credential_stamp(&account);

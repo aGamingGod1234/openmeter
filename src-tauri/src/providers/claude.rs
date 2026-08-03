@@ -1,5 +1,5 @@
 use super::{http, Metric, Snapshot};
-use crate::accounts::{AccountContext, AccountSource};
+use crate::accounts::{AccountContext, AccountSourceKind};
 use crate::environment::EnvironmentSnapshot;
 use chrono::{DateTime, Utc};
 use serde_json::{json, Value};
@@ -33,11 +33,12 @@ pub async fn snapshot_for_with_environment(
     account: &AccountContext,
     environment: &EnvironmentSnapshot,
 ) -> Snapshot {
-    let path = match &account.source {
-        AccountSource::DefaultHome => credentials_path(environment),
-        AccountSource::Directory { path } if path.is_file() => path.clone(),
-        AccountSource::Directory { path } => path.join(".credentials.json"),
-        AccountSource::Manual => {
+    let source = account.primary_source();
+    let path = match source.map(|source| (source.kind, source.path.as_ref())) {
+        Some((AccountSourceKind::DefaultHome, _)) => credentials_path(environment),
+        Some((AccountSourceKind::Directory, Some(path))) if path.is_file() => path.clone(),
+        Some((AccountSourceKind::Directory, Some(path))) => path.join(".credentials.json"),
+        _ => {
             return Snapshot::no_credentials(
                 &account.card_id,
                 &account.display_name,

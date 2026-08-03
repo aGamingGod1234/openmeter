@@ -1,5 +1,5 @@
 use super::{http, Metric, Snapshot};
-use crate::accounts::{AccountContext, AccountSource};
+use crate::accounts::{AccountContext, AccountSourceKind};
 use crate::environment::EnvironmentSnapshot;
 use base64::Engine;
 use chrono::Utc;
@@ -44,11 +44,12 @@ pub async fn snapshot_for_with_environment(
     account: &AccountContext,
     environment: &EnvironmentSnapshot,
 ) -> Snapshot {
-    let path = match &account.source {
-        AccountSource::DefaultHome => auth_path(environment),
-        AccountSource::Directory { path } if path.is_file() => path.clone(),
-        AccountSource::Directory { path } => path.join("auth.json"),
-        AccountSource::Manual => {
+    let source = account.primary_source();
+    let path = match source.map(|source| (source.kind, source.path.as_ref())) {
+        Some((AccountSourceKind::DefaultHome, _)) => auth_path(environment),
+        Some((AccountSourceKind::Directory, Some(path))) if path.is_file() => path.clone(),
+        Some((AccountSourceKind::Directory, Some(path))) => path.join("auth.json"),
+        _ => {
             return Snapshot::no_credentials(
                 &account.card_id,
                 &account.display_name,
