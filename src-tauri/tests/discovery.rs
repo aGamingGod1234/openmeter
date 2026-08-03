@@ -2,8 +2,10 @@ use std::collections::{BTreeMap, HashSet};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-use openmeter_lib::accounts::AccountSourceKind;
-use openmeter_lib::discovery::{discover_claude_sources, discover_codex_sources};
+use openmeter_lib::accounts::{AccountRegistry, AccountSourceKind};
+use openmeter_lib::discovery::{
+    discover_claude_sources, discover_codex_sources, reconcile_discovered_accounts,
+};
 use openmeter_lib::environment::EnvironmentSnapshot;
 
 #[test]
@@ -65,6 +67,25 @@ fn codex_requires_a_non_secret_account_claim_and_honors_captured_codex_home() {
     assert_eq!(found[0].identity_key, "acct-work");
     assert_eq!(found[0].source.kind, AccountSourceKind::DefaultHome);
     assert!(found[0].source.holds_default_source);
+
+    let _ = std::fs::remove_dir_all(home);
+}
+
+#[test]
+fn reconciliation_persists_one_record_per_identity_with_all_local_sources() {
+    let home = temp_home("reconcile");
+    write_claude(&home.join(".claude"), "org_same", "Personal");
+    write_claude(&home.join(".claude-work"), "org_same", "Company");
+    write_claude(&home.join(".claude-side"), "org_other", "Side");
+    let environment = snapshot(home.clone(), BTreeMap::new());
+    let mut registry = AccountRegistry::default();
+
+    reconcile_discovered_accounts(&mut registry, &environment).unwrap();
+
+    assert_eq!(registry.accounts().len(), 2);
+    assert_eq!(registry.accounts()[0].card_id, "claude");
+    assert_eq!(registry.accounts()[0].sources.len(), 2);
+    assert!(registry.accounts()[1].card_id.starts_with("claude@"));
 
     let _ = std::fs::remove_dir_all(home);
 }
