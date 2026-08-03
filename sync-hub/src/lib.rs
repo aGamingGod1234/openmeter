@@ -1,1 +1,3 @@
-// Implemented after the transactional store contract tests fail.
+mod store;
+
+pub use store::{HubError, PutError, Store};
