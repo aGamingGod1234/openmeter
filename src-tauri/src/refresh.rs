@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::accounts::{AccountContext, AccountRegistry};
 use crate::cache::SnapshotCache;
+use crate::discovery::reconcile_discovered_accounts;
 use crate::providers::{self, ProviderSnapshot};
 
 const FRESH_MS: i64 = 5 * 60 * 1_000;
@@ -306,7 +307,12 @@ pub fn default_targets(disabled: &[String]) -> Vec<RefreshTarget> {
         .filter_map(|descriptor| AccountContext::default_for(descriptor.id).ok())
         .collect();
     let registry_path = providers::config_dir().join("accounts-v1.json");
-    if let Ok(registry) = AccountRegistry::load(&registry_path) {
+    if let Ok(mut registry) = AccountRegistry::load(&registry_path) {
+        if reconcile_discovered_accounts(&mut registry, crate::environment::launch_environment())
+            .is_ok()
+        {
+            let _ = registry.save(&registry_path);
+        }
         for account in registry.accounts() {
             if let Some(position) = accounts
                 .iter()

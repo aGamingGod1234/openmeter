@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use base64::Engine;
 use serde_json::Value;
 
-use crate::accounts::AccountSource;
+use crate::accounts::{AccountRegistry, AccountSource};
 use crate::environment::EnvironmentSnapshot;
 
 const MAX_DIRECTORY_ENTRIES: usize = 128;
@@ -37,6 +37,23 @@ pub fn discover_codex_sources(environment: &EnvironmentSnapshot) -> Vec<Discover
         .unwrap_or_else(|| environment.home_dir().join(".codex"));
     let candidates = vec![active.clone(), environment.home_dir().join(".codex")];
     discover_candidates("codex", candidates, &active, codex_identity)
+}
+
+pub fn reconcile_discovered_accounts(
+    registry: &mut AccountRegistry,
+    environment: &EnvironmentSnapshot,
+) -> Result<(), String> {
+    discover_claude_sources(environment)
+        .into_iter()
+        .chain(discover_codex_sources(environment))
+        .try_for_each(|discovered| {
+            registry.upsert_discovered(
+                &discovered.provider_id,
+                &discovered.identity_key,
+                discovered.suggested_label.as_deref(),
+                discovered.source,
+            )
+        })
 }
 
 fn discover_candidates(
