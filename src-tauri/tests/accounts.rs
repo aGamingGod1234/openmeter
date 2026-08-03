@@ -1,6 +1,32 @@
 use std::path::PathBuf;
 
-use openmeter_lib::accounts::{AccountContext, AccountRegistry, AccountSource};
+use openmeter_lib::accounts::{AccountContext, AccountRegistry, AccountSource, AccountSourceKind};
+
+#[test]
+fn version_one_registry_migrates_without_changing_ids_or_labels() {
+    let path = temp_registry_path();
+    std::fs::write(&path, include_str!("fixtures/accounts-v1.json")).unwrap();
+
+    let registry = AccountRegistry::load(&path).expect("migrate version one registry");
+    assert_eq!(registry.accounts().len(), 2);
+    assert_eq!(registry.accounts()[0].card_id, "claude");
+    assert_eq!(registry.accounts()[1].card_id, "claude--work");
+    assert_eq!(registry.accounts()[1].display_name, "Claude — Work");
+    assert_eq!(registry.accounts()[1].label.as_deref(), Some("Work"));
+    assert_eq!(
+        registry.accounts()[1].sources[0].kind,
+        AccountSourceKind::Directory
+    );
+
+    registry.save(&path).expect("save migrated registry");
+    let raw = std::fs::read_to_string(&path).unwrap();
+    assert!(raw.contains("\"version\": 2"));
+    assert!(raw.contains("\"sources\""));
+    assert!(!raw.contains("\"source\":"));
+    assert_eq!(AccountRegistry::load(&path).unwrap(), registry);
+
+    let _ = std::fs::remove_file(path);
+}
 
 #[test]
 fn sources_with_the_same_identity_merge_into_one_stable_account() {

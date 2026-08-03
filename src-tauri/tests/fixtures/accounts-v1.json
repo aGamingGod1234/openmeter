@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "accounts": [
+    {
+      "provider_id": "claude",
+      "account_id": "default",
+      "card_id": "claude",
+      "display_name": "Claude",
+      "source": { "kind": "default_home" },
+      "enabled": true
+    },
+    {
+      "provider_id": "claude",
+      "account_id": "work",
+      "card_id": "claude--work",
+      "display_name": "Claude — Work",
+      "source": { "kind": "directory", "path": "D:\\AI\\claude-work" },
+      "enabled": true
+    }
+  ]
+}
