@@ -65,6 +65,19 @@ fn routes_usage_and_limits_by_provider_family_or_exact_card() {
 }
 
 #[test]
+fn routes_resolve_the_registry_label_instead_of_the_cached_snapshot_name() {
+    let mut accounts = registry();
+    accounts.rename("codex--work", "Company").unwrap();
+    let state = ApiState::new(accounts);
+    state.publish(&snapshots(), 1_500);
+
+    let response = state.route(&Method::Get, "/v1/usage/codex--work");
+
+    assert_eq!(response.status, 200);
+    assert_eq!(response.body[0]["displayName"], "Codex — Company");
+}
+
+#[test]
 fn known_accounts_without_snapshots_are_empty_but_unknown_ids_are_404() {
     let state = ApiState::new(registry());
     state.publish(&snapshots(), 1_500);
