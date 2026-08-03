@@ -56,6 +56,51 @@ fn sources_with_the_same_identity_merge_into_one_stable_account() {
 }
 
 #[test]
+fn discovered_identities_get_stable_primary_and_sibling_cards_idempotently() {
+    let mut registry = AccountRegistry::default();
+    registry
+        .upsert_discovered(
+            "claude",
+            "organization:personal",
+            Some("Personal"),
+            AccountSource::default_home("claude-home"),
+        )
+        .unwrap();
+    registry
+        .upsert_discovered(
+            "claude",
+            "organization:personal",
+            Some("Duplicate label"),
+            AccountSource::directory("claude-alt", PathBuf::from(r"D:\Claude")).unwrap(),
+        )
+        .unwrap();
+    registry
+        .upsert_discovered(
+            "claude",
+            "organization:company",
+            Some("Company"),
+            AccountSource::directory("claude-work", PathBuf::from(r"D:\ClaudeWork")).unwrap(),
+        )
+        .unwrap();
+    registry
+        .upsert_discovered(
+            "claude",
+            "organization:company",
+            Some("Company"),
+            AccountSource::directory("claude-work", PathBuf::from(r"D:\ClaudeWork")).unwrap(),
+        )
+        .unwrap();
+
+    assert_eq!(registry.accounts().len(), 2);
+    assert_eq!(registry.accounts()[0].card_id, "claude");
+    assert_eq!(registry.accounts()[0].label.as_deref(), Some("Personal"));
+    assert_eq!(registry.accounts()[0].sources.len(), 2);
+    assert!(registry.accounts()[1].card_id.starts_with("claude@"));
+    assert_eq!(registry.accounts()[1].label.as_deref(), Some("Company"));
+    assert_eq!(registry.accounts()[1].sources.len(), 1);
+}
+
+#[test]
 fn default_and_named_accounts_have_stable_card_ids() {
     let default = AccountContext::default_for("claude").expect("valid default account");
     let work = AccountContext::named("claude", "work", "Work").expect("valid named account");
