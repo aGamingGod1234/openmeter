@@ -250,6 +250,59 @@ impl AccountRegistry {
         self.validate()
     }
 
+    pub fn upsert_discovered(
+        &mut self,
+        provider_id: &str,
+        identity_key: &str,
+        suggested_label: Option<&str>,
+        source: AccountSource,
+    ) -> Result<(), String> {
+        validate_segment("provider", provider_id)?;
+        let identity_key = identity_key.trim();
+        if identity_key.is_empty() {
+            return Err("account identity key cannot be empty".to_string());
+        }
+
+        let matching_identity = self.accounts.iter().position(|account| {
+            account.provider_id == provider_id
+                && account.identity_key.as_deref() == Some(identity_key)
+        });
+        let matching_location = self.accounts.iter().position(|account| {
+            account.provider_id == provider_id
+                && account.identity_key.is_none()
+                && account
+                    .sources
+                    .iter()
+                    .any(|existing| same_source_location(existing, &source))
+        });
+        let default_record = self.accounts.iter().position(|account| {
+            account.provider_id == provider_id
+                && account.account_id.as_str() == "default"
+                && account.identity_key.is_none()
+                && source.holds_default_source
+        });
+
+        if let Some(position) = matching_identity.or(matching_location).or(default_record) {
+            let account = &mut self.accounts[position];
+            account.identity_key = Some(identity_key.to_string());
+            seed_label(account, suggested_label);
+            merge_source(account, source);
+            return self.validate();
+        }
+
+        let account = if self
+            .accounts
+            .iter()
+            .all(|account| account.provider_id != provider_id)
+        {
+            AccountContext::identified(provider_id, identity_key, suggested_label, source)?
+        } else {
+            self.discovered_sibling(provider_id, identity_key, suggested_label, source)?
+        };
+        self.accounts.push(account);
+        self.validate()
+    }
+
     pub fn remove(&mut self, card_id: &str) -> Result<bool, String> {
         let before = self.accounts.len();
         self.accounts.retain(|account| account.card_id != card_id);
@@ -315,6 +368,8 @@ impl AccountRegistry {
             validate_segment("account", account.account_id.as_str())?;
             let expected = if account.account_id.as_str() == "default" {
                 account.provider_id.clone()
+            } else if account.identity_key.is_some() && account.card_id.contains('@') {
+                format!("{}@{}", account.provider_id, account.account_id.as_str())
             } else {
                 format!("{}--{}", account.provider_id, account.account_id.as_str())
             };
@@ -356,6 +411,78 @@ impl AccountRegistry {
             }
         }
         Ok(())
+    }
+
+    fn discovered_sibling(
+        &self,
+        provider_id: &str,
+        identity_key: &str,
+        suggested_label: Option<&str>,
+        source: AccountSource,
+    ) -> Result<AccountContext, String> {
+        let hash =
+            crate::redaction::credential_stamp(format!("{provider_id}\0{identity_key}").as_bytes());
+        let account_id = (8..=hash.len())
+            .step_by(4)
+            .map(|length| &hash[..length])
+            .find(|candidate| {
+                let card_id = format!("{provider_id}@{candidate}");
+                self.accounts
+                    .iter()
+                    .all(|account| account.card_id != card_id)
+            })
+            .ok_or_else(|| "could not allocate a stable discovered account id".to_string())?;
+        let label = suggested_label
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        Ok(AccountContext {
+            provider_id: provider_id.to_string(),
+            account_id: AccountId::new(account_id)?,
+            card_id: format!("{provider_id}@{account_id}"),
+            display_name: label
+                .as_deref()
+                .map(|value| format!("{} — {value}", provider_display_name(provider_id)))
+                .unwrap_or_else(|| provider_display_name(provider_id)),
+            identity_key: Some(identity_key.to_string()),
+            label,
+            sources: vec![source],
+            enabled: true,
+        })
+    }
+}
+
+fn same_source_location(left: &AccountSource, right: &AccountSource) -> bool {
+    left.id == right.id
+        || (left.kind == AccountSourceKind::Directory
+            && right.kind == AccountSourceKind::Directory
+            && left.path == right.path)
+        || (left.kind == AccountSourceKind::DefaultHome
+            && right.kind == AccountSourceKind::DefaultHome)
+}
+
+fn merge_source(account: &mut AccountContext, source: AccountSource) {
+    if let Some(existing) = account
+        .sources
+        .iter_mut()
+        .find(|existing| same_source_location(existing, &source))
+    {
+        *existing = source;
+    } else {
+        account.sources.push(source);
+    }
+}
+
+fn seed_label(account: &mut AccountContext, suggested_label: Option<&str>) {
+    if account.label.is_some() {
+        return;
+    }
+    let label = suggested_label
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    if let Some(label) = label {
+        account.label = Some(label.to_string());
+        account.display_name = format!("{} — {label}", provider_display_name(&account.provider_id));
     }
 }
 
