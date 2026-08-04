@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
@@ -153,13 +154,15 @@ fn v2(device_id: &str, revision: u64) -> EncryptedEnvelope {
 }
 
 fn temp_db() -> PathBuf {
+    static NEXT_DB: AtomicU64 = AtomicU64::new(0);
     std::env::temp_dir().join(format!(
-        "openmeter-sync-tracking-{}-{}.db",
+        "openmeter-sync-tracking-{}-{}-{}.db",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
-            .as_nanos()
+            .as_nanos(),
+        NEXT_DB.fetch_add(1, Ordering::Relaxed)
     ))
 }
 
