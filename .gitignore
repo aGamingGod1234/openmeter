@@ -23,6 +23,7 @@ src-tauri/gen
 # Local build scratch (TMP redirected here — C: is tight)
 .tmp/
 build-latest.log
+/artifacts/private-msix/
 
 # Session tooling
 .claude/

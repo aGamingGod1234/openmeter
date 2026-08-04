@@ -92,5 +92,106 @@ function New-OpenMeterMsixLayout {
     return $OutputRoot
 }
 
-Export-ModuleMember -Function Resolve-WindowsSdkTool, New-OpenMeterMsixLayout
+function Get-OrCreateOpenMeterSigningCertificate {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [ValidatePattern('^CN=[^,]+$')]
+        [string]$Subject
+    )
 
+    $now = Get-Date
+    $matches = @(Get-ChildItem -LiteralPath 'Cert:\CurrentUser\My' | Where-Object {
+        $_.Subject -eq $Subject -and
+        $_.HasPrivateKey -and
+        $_.NotBefore -le $now -and
+        $_.NotAfter -gt $now.AddDays(30)
+    })
+    if ($matches.Count -gt 1) {
+        throw "More than one usable signing certificate has subject '$Subject'."
+    }
+    if ($matches.Count -eq 1) {
+        return $matches[0]
+    }
+
+    return New-SelfSignedCertificate `
+        -Type CodeSigningCert `
+        -Subject $Subject `
+        -KeyAlgorithm RSA `
+        -KeyLength 3072 `
+        -KeyExportPolicy NonExportable `
+        -HashAlgorithm SHA256 `
+        -CertStoreLocation 'Cert:\CurrentUser\My' `
+        -NotAfter $now.AddYears(3)
+}
+
+function Assert-OpenMeterSignature {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][ValidatePattern('^[0-9A-Fa-f]{40}$')][string]$Thumbprint,
+        [switch]$RequireTrusted
+    )
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "Signed file does not exist: $Path"
+    }
+    $signature = Get-AuthenticodeSignature -LiteralPath $Path
+    if (-not $signature.SignerCertificate) {
+        throw "File has no Authenticode signer: $Path"
+    }
+    if ($signature.SignerCertificate.Thumbprint -ne $Thumbprint) {
+        throw "Unexpected Authenticode signer for '$Path'."
+    }
+    if ($signature.Status -in @('NotSigned', 'HashMismatch')) {
+        throw "Invalid Authenticode signature for '$Path': $($signature.StatusMessage)"
+    }
+    if ($RequireTrusted -and $signature.Status -ne 'Valid') {
+        throw "Authenticode signature is not trusted for '$Path': $($signature.StatusMessage)"
+    }
+    return $signature
+}
+
+function Assert-OpenMeterPrebuiltSet {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Root)
+
+    if (-not (Test-Path -LiteralPath $Root -PathType Container)) {
+        throw "Prebuilt directory does not exist: $Root"
+    }
+    $checksumPath = Join-Path $Root 'SHA256SUMS.txt'
+    if (-not (Test-Path -LiteralPath $checksumPath -PathType Leaf)) {
+        throw "Prebuilt checksum file is missing: $checksumPath"
+    }
+
+    $expected = @{}
+    foreach ($line in Get-Content -LiteralPath $checksumPath) {
+        if ($line -match '^([0-9A-Fa-f]{64})\s+\*?([^\\/]+)$') {
+            $expected[$matches[2]] = $matches[1].ToUpperInvariant()
+        }
+    }
+
+    $verified = foreach ($name in 'openmeter-tray.exe', 'openmeter.exe', 'openmeter-sync-hub.exe') {
+        if (-not $expected.ContainsKey($name)) {
+            throw "No recorded SHA-256 checksum exists for '$name'."
+        }
+        $path = Join-Path $Root $name
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+            throw "Required prebuilt binary is missing: $path"
+        }
+        $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $path).Hash
+        if ($actual -ne $expected[$name]) {
+            throw "SHA-256 mismatch for prebuilt binary '$name'."
+        }
+        $path
+    }
+    return $verified
+}
+
+Export-ModuleMember -Function @(
+    'Resolve-WindowsSdkTool',
+    'New-OpenMeterMsixLayout',
+    'Get-OrCreateOpenMeterSigningCertificate',
+    'Assert-OpenMeterSignature',
+    'Assert-OpenMeterPrebuiltSet'
+)

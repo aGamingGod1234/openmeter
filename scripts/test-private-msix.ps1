@@ -77,13 +77,87 @@ function Test-Layout {
     }
 }
 
-if ($SigningOnly) {
-    throw 'Signing tests have not been implemented yet.'
+function Test-Signing {
+    $suffix = [guid]::NewGuid().ToString('N')
+    $subject = "CN=OpenMeter Private MSIX Test $suffix"
+    $scratch = Join-Path ([System.IO.Path]::GetTempPath()) "openmeter-msix-signing-$suffix"
+    $thumbprint = $null
+    try {
+        New-Item -ItemType Directory -Path $scratch | Out-Null
+        $first = Get-OrCreateOpenMeterSigningCertificate -Subject $subject
+        $thumbprint = $first.Thumbprint
+        $second = Get-OrCreateOpenMeterSigningCertificate -Subject $subject
+
+        Assert-Equal $first.Thumbprint $second.Thumbprint 'Signing certificate was not reused'
+        Assert-Equal $first.Subject $subject 'Signing certificate subject mismatch'
+        Assert-True $first.HasPrivateKey 'Signing certificate has no private key'
+        Assert-True ($first.NotAfter -gt [DateTime]::UtcNow.AddDays(300)) 'Signing certificate lifetime is too short'
+
+        $codeSigningEku = @($first.Extensions | Where-Object { $_.Oid.Value -eq '2.5.29.37' } | ForEach-Object {
+            $_.EnhancedKeyUsages | ForEach-Object { $_.Value }
+        })
+        Assert-True ($codeSigningEku -contains '1.3.6.1.5.5.7.3.3') 'Certificate lacks Code Signing EKU'
+
+        $rsa = [System.Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPrivateKey($first)
+        try {
+            Assert-Equal $rsa.KeySize 3072 'Signing key is not RSA 3072'
+            if ($rsa -is [System.Security.Cryptography.RSACng]) {
+                $exportPolicy = $rsa.Key.ExportPolicy
+                $exportable = ($exportPolicy -band [System.Security.Cryptography.CngExportPolicies]::AllowExport) -ne 0 -or
+                    ($exportPolicy -band [System.Security.Cryptography.CngExportPolicies]::AllowPlaintextExport) -ne 0
+                Assert-True (-not $exportable) 'Signing private key is exportable'
+            }
+            elseif ($rsa -is [System.Security.Cryptography.RSACryptoServiceProvider]) {
+                Assert-True (-not $rsa.CspKeyContainerInfo.Exportable) 'Signing private key is exportable'
+            }
+        }
+        finally {
+            if ($rsa) { $rsa.Dispose() }
+        }
+
+        $unsigned = Join-Path $scratch 'unsigned.exe'
+        [System.IO.File]::WriteAllText($unsigned, 'not a signed PE')
+        $rejected = $false
+        try { Assert-OpenMeterSignature -Path $unsigned -Thumbprint $thumbprint } catch { $rejected = $true }
+        Assert-True $rejected 'Unsigned payload was accepted'
+
+        $prebuilt = Join-Path $scratch 'prebuilt'
+        New-Item -ItemType Directory -Path $prebuilt | Out-Null
+        $checksumLines = foreach ($name in 'openmeter-tray.exe', 'openmeter.exe', 'openmeter-sync-hub.exe') {
+            $path = Join-Path $prebuilt $name
+            [System.IO.File]::WriteAllText($path, "verified-$name")
+            $hash = Get-FileHash -Algorithm SHA256 -LiteralPath $path
+            '{0}  {1}' -f $hash.Hash, $name
+        }
+        [System.IO.File]::WriteAllLines((Join-Path $prebuilt 'SHA256SUMS.txt'), $checksumLines)
+        $verified = @(Assert-OpenMeterPrebuiltSet -Root $prebuilt)
+        Assert-Equal $verified.Count 3 'Unexpected verified prebuilt count'
+
+        [System.IO.File]::AppendAllText((Join-Path $prebuilt 'openmeter.exe'), 'tampered')
+        $tamperRejected = $false
+        try { Assert-OpenMeterPrebuiltSet -Root $prebuilt | Out-Null } catch { $tamperRejected = $true }
+        Assert-True $tamperRejected 'Tampered prebuilt binary was accepted'
+    }
+    finally {
+        if ($thumbprint -and (Test-Path -LiteralPath "Cert:\CurrentUser\My\$thumbprint")) {
+            Remove-Item -LiteralPath "Cert:\CurrentUser\My\$thumbprint" -Force
+        }
+        if (Test-Path -LiteralPath $scratch) {
+            Remove-Item -LiteralPath $scratch -Recurse -Force
+        }
+    }
 }
+
 if ($InstallOnly) {
     throw 'Install tests have not been implemented yet.'
 }
 
-Test-Layout
-Write-Host 'Private MSIX layout tests passed.'
+if ($SigningOnly) {
+    Test-Signing
+    Write-Host 'Private MSIX signing tests passed.'
+    exit 0
+}
 
+Test-Layout
+if (-not $LayoutOnly) { Test-Signing }
+Write-Host 'Private MSIX tests passed.'
