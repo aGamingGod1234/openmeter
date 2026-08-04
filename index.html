@@ -210,6 +210,11 @@
           <p class="settings-note" id="sync-summary">Checking sync status…</p>
           <div id="sync-device-list" class="settings-note"></div>
           <div class="setting-row">
+            <label for="sync-device-label">This device</label>
+            <input id="sync-device-label" type="text" minlength="1" maxlength="32" spellcheck="false" />
+            <button id="sync-save-label" type="button">Save label</button>
+          </div>
+          <div class="setting-row">
             <label for="sync-enrollment-token">Enrollment token</label>
             <input id="sync-enrollment-token" type="password" autocomplete="off" spellcheck="false" />
             <button id="sync-enroll" type="button">Enroll</button>

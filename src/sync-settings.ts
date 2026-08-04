@@ -12,6 +12,20 @@ export interface SyncStatus {
   last_success_ms: number | null;
   has_history_key: boolean;
   has_device_credential: boolean;
+  tracking_last_success_ms: number | null;
+  device_label: string;
+  protocol_version: string;
+  devices: SyncDeviceSummary[];
+}
+
+export interface SyncDeviceSummary {
+  device_id: string;
+  label: string;
+  protocol_version: string;
+  client_version: string;
+  last_generated_ms: number;
+  last_received_ms: number;
+  state: "current" | "delayed" | "offline" | "needs_upgrade" | "revoked" | "quarantined";
 }
 
 export function normalizeSyncSettings(value: Partial<Record<keyof SyncSettings, unknown>>): SyncSettings {
@@ -46,7 +60,18 @@ export function renderSyncSummary(status: SyncStatus): string {
   const last = status.last_success_ms
     ? `Last synced ${new Date(status.last_success_ms).toLocaleString()}`
     : "Not synced yet";
-  return `${status.device_id} · ${last}`;
+  return `${status.device_label || status.device_id} · ${status.protocol_version} · ${last}`;
+}
+
+export function shortDeviceRef(deviceId: string): string {
+  return deviceId.length <= 12 ? deviceId : `${deviceId.slice(0, 8)}…${deviceId.slice(-4)}`;
+}
+
+export function deviceStateLabel(state: SyncDeviceSummary["state"]): string {
+  return state
+    .split("_")
+    .map((part) => part[0]?.toUpperCase() + part.slice(1))
+    .join(" ");
 }
 
 export function recoveryKeyNotice(): string {

@@ -25,7 +25,6 @@ impl PeerTrackingState {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
 pub struct TrackingDashboard {
     pub generated_at_ms: i64,
     pub devices: Vec<TrackingDevice>,
@@ -37,17 +36,17 @@ pub struct TrackingDashboard {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
 pub struct TrackingDevice {
     pub device_id: String,
     pub label: String,
     pub generated_at_ms: i64,
     pub received_at_ms: i64,
+    pub client_version: String,
+    pub unique_events: usize,
     pub quarantined: bool,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
 pub struct TrackingDay {
     pub day: String,
     pub device_id: String,
@@ -59,7 +58,6 @@ pub struct TrackingDay {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
 pub struct TrackingQuota {
     pub provider_id: String,
     pub record_id: String,
@@ -173,6 +171,11 @@ pub fn project_tracking(
             label: candidate.payload.device.label.clone(),
             generated_at_ms: candidate.payload.device.generated_at_ms,
             received_at_ms: candidate.received_at_ms,
+            client_version: candidate.payload.device.client_version.clone(),
+            unique_events: events
+                .values()
+                .filter(|owned| owned.device_id == candidate.payload.device.device_id)
+                .count(),
             quarantined: quarantined.contains(&candidate.payload.device.device_id),
         })
         .collect();
@@ -187,6 +190,11 @@ pub fn project_tracking(
                 label: peer.current.device.label.clone(),
                 generated_at_ms: peer.current.device.generated_at_ms,
                 received_at_ms: peer.received_at_ms,
+                client_version: peer.current.device.client_version.clone(),
+                unique_events: events
+                    .values()
+                    .filter(|owned| owned.device_id == peer.current.device.device_id)
+                    .count(),
                 quarantined: true,
             });
         }

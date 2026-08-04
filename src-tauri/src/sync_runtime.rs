@@ -44,6 +44,7 @@ pub struct SyncDeviceSummary {
     pub device_id: String,
     pub label: String,
     pub protocol_version: String,
+    pub client_version: String,
     pub last_generated_ms: i64,
     pub last_received_ms: i64,
     pub state: String,
@@ -485,6 +486,7 @@ fn client() -> Result<SyncClient, String> {
 }
 
 fn status_from_config(config: &Value) -> Result<SyncStatus, String> {
+    let now_ms = chrono::Utc::now().timestamp_millis();
     let devices = dashboard()
         .lock()
         .ok()
@@ -497,10 +499,17 @@ fn status_from_config(config: &Value) -> Result<SyncStatus, String> {
                     device_id: device.device_id,
                     label: device.label,
                     protocol_version: "v2".to_string(),
+                    client_version: device.client_version.clone(),
                     last_generated_ms: device.generated_at_ms,
                     last_received_ms: device.received_at_ms,
                     state: if device.quarantined {
                         "quarantined"
+                    } else if device.client_version != env!("CARGO_PKG_VERSION") {
+                        "needs_upgrade"
+                    } else if now_ms.saturating_sub(device.received_at_ms) > 30 * 60 * 1_000 {
+                        "offline"
+                    } else if now_ms.saturating_sub(device.received_at_ms) > 10 * 60 * 1_000 {
+                        "delayed"
                     } else {
                         "current"
                     }

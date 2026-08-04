@@ -1,3 +1,4 @@
+import "./browser-preview";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
@@ -17,8 +18,21 @@ import {
   normalizeSyncSettings,
   recoveryKeyNotice,
   renderSyncSummary,
+  deviceStateLabel,
+  shortDeviceRef,
   type SyncStatus,
 } from "./sync-settings";
+import {
+  buildTrackingSeries,
+  filterTracking,
+  quotaDisagreementCopy,
+  selectQuotaRows,
+  trackingSummary,
+  type TrackingDashboard,
+  type TrackingGroup,
+  type TrackingMetric,
+  type TrackingRange,
+} from "./tracking";
 
 // Injected by vite.config.ts at build time, e.g. "0707.1432".
 declare const __BUILD_STAMP__: string;
@@ -317,6 +331,11 @@ let refreshing = false;
 let refreshTimer: number | undefined;
 let lastSnapshots: Snapshot[] = [];
 let lastSpend: ProviderSpend[] = [];
+let lastTracking: TrackingDashboard | null = null;
+let trackingDevice = "all";
+let trackingRange: TrackingRange = 7;
+let trackingMetric: TrackingMetric = "tokens";
+let trackingGroup: TrackingGroup = "device";
 let spendLoaded = false;
 let spendTab: SpendTab = "today";
 let customizeOpen = false;
@@ -770,7 +789,7 @@ function renderCard(s: Snapshot): string {
   let caret = "";
   if (s.status === "ok") {
     const L = providerLayout(cardId);
-    const spend = lastSpend.find((sp) => sp.id === providerId);
+    const spend = activeSpend().find((sp) => sp.id === providerId);
     const visible = L.metricOrder.filter((k) => !L.hidden.includes(k));
     const always = visible.filter((k) => !L.onDemand.includes(k));
     const onDemand = visible.filter((k) => L.onDemand.includes(k));
@@ -848,6 +867,62 @@ type DonutEntry = {
 };
 
 const OTHERS_ID = "__others__";
+
+function activeSpend(): ProviderSpend[] {
+  if (!lastTracking || (lastTracking.devices.length === 0 && lastTracking.days.length === 0)) {
+    return lastSpend;
+  }
+  const rows = filterTracking(lastTracking, trackingDevice).days;
+  const today = new Date().toISOString().slice(0, 10);
+  const yesterday = shiftDay(today, -1);
+  const first30 = shiftDay(today, -29);
+  const byProvider = new Map<string, typeof rows>();
+  for (const row of rows) {
+    const list = byProvider.get(row.provider_id) ?? [];
+    list.push(row);
+    byProvider.set(row.provider_id, list);
+  }
+  return [...byProvider.entries()].map(([providerId, providerRows]) => {
+    const window = (selected: typeof rows): SpendWindow => {
+      const models = new Map<string, ModelSpend>();
+      for (const row of selected) {
+        const model = models.get(row.model) ?? { model: row.model, cost: 0, tokens: 0 };
+        model.cost += row.cost;
+        model.tokens += row.tokens;
+        models.set(row.model, model);
+      }
+      return {
+        cost: selected.reduce((sum, row) => sum + row.cost, 0),
+        tokens: selected.reduce((sum, row) => sum + row.tokens, 0),
+        models: [...models.values()].sort((left, right) => right.cost - left.cost),
+      };
+    };
+    const trend = Array.from({ length: 30 }, (_, index) => {
+      const day = shiftDay(today, index - 29);
+      return providerRows
+        .filter((row) => row.day === day)
+        .reduce((sum, row) => sum + row.tokens, 0);
+    });
+    return {
+      id: providerId,
+      name:
+        lastSnapshots.find((snapshot) => snapshotProviderId(snapshot) === providerId)?.name ??
+        providerId,
+      today: window(providerRows.filter((row) => row.day === today)),
+      yesterday: window(providerRows.filter((row) => row.day === yesterday)),
+      last30: window(providerRows.filter((row) => row.day >= first30 && row.day <= today)),
+      trend,
+      unpriced: 0,
+      unpriced_models: [],
+    };
+  });
+}
+
+function shiftDay(day: string, delta: number): string {
+  const date = new Date(`${day}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + delta);
+  return date.toISOString().slice(0, 10);
+}
 /// Providers under this many dollars (in the visible window) fold into
 /// one "Others" wedge; hovering it lists who spent what. The bar scales
 /// with the period — a day's ring earns a slice at $5, a month's at $10.
@@ -856,7 +931,7 @@ function othersFoldUsd(tab: SpendTab): number {
 }
 
 function donutEntries(tab: SpendTab): DonutEntry[] {
-  const all: DonutEntry[] = lastSpend
+  const all: DonutEntry[] = activeSpend()
     .filter((s) => !config.disabled.includes(s.id)) // disabled = gone everywhere
     .map((s) => ({ s, w: s[tab] }))
     // Membership, order, and wedge share all follow the active metric so
@@ -1108,7 +1183,8 @@ function switchSpendTab(tab: SpendTab): void {
 function renderTotalSpend(): string {
   if (!config.showTotalSpend) return "";
   const entries = donutEntries(spendTab);
-  if (lastSpend.length === 0) {
+  const displayedSpend = activeSpend();
+  if (displayedSpend.length === 0) {
     // Quiet state instead of a missing card — on a fresh PC the donut only
     // appears after a CLI (Claude Code, Codex, Grok…) has logged some usage.
     const note = spendLoaded
@@ -1165,7 +1241,7 @@ function renderTotalSpend(): string {
         <div class="legend"><p class="placeholder" style="margin:0">No spend in this period.</p></div>
       </div>`;
 
-  const contributors = lastSpend.map((s) => s.name).join(", ");
+  const contributors = displayedSpend.map((s) => s.name).join(", ");
   return `
     <article class="provider total-spend">
       <div class="provider-head">
@@ -1932,7 +2008,7 @@ function renderWelcome(): string {
 function renderAll(): void {
   const el = document.querySelector("#providers")!;
   el.innerHTML =
-    renderWelcome() + renderTotalSpend() + orderedSnapshots().map(renderCard).join("");
+    renderWelcome() + renderTracking() + renderTotalSpend() + orderedSnapshots().map(renderCard).join("");
   if (customizeOpen) renderDrawerBody();
   rebuildTrail();
 }
@@ -2042,7 +2118,7 @@ function updateTrailActive(): void {
 function showTrendTip(el: HTMLElement): void {
   const tip = document.querySelector<HTMLElement>("#model-tip")!;
   const [id, idxStr] = (el.dataset.trend ?? "").split("|");
-  const spend = lastSpend.find((s) => s.id === id);
+  const spend = activeSpend().find((s) => s.id === id);
   const i = Number(idxStr);
   if (!spend || Number.isNaN(i)) return;
 
@@ -2070,7 +2146,7 @@ function showTrendTip(el: HTMLElement): void {
 function showModelTip(row: HTMLElement): void {
   const tip = document.querySelector<HTMLElement>("#model-tip")!;
   const [id, key] = (row.dataset.spend ?? "").split("|");
-  const spend = lastSpend.find((s) => s.id === id);
+  const spend = activeSpend().find((s) => s.id === id);
   const w = spend?.[key as SpendTab];
   if (!w) return;
 
@@ -2126,6 +2202,7 @@ async function refresh(force = false): Promise<void> {
   // The spend scan re-reads every session log on a cold start and can take
   // tens of seconds — it must never hold up the usage cards' first paint.
   const spendPromise = invoke<ProviderSpend[]>("fetch_spend").catch(() => null);
+  const trackingPromise = invoke<TrackingDashboard>("fetch_tracking").catch(() => null);
   try {
     let snapshots = await invoke<Snapshot[]>("fetch_usage");
     // First launch ever (no layout yet): start with only the providers that
@@ -2199,10 +2276,19 @@ async function refresh(force = false): Promise<void> {
   } catch (err) {
     status.textContent = `Refresh failed: ${err}`;
   }
-  const spend = await spendPromise;
+  const [spend, tracking] = await Promise.all([spendPromise, trackingPromise]);
   spendLoaded = true;
   if (spend) lastSpend = spend;
-  if (!customizeOpen && lastSnapshots.length) renderIfVisible();
+  if (tracking) {
+    lastTracking = tracking;
+    if (
+      trackingDevice !== "all" &&
+      !tracking.devices.some((device) => device.device_id === trackingDevice)
+    ) {
+      trackingDevice = "all";
+    }
+  }
+  if (!customizeOpen && (lastSnapshots.length || lastTracking)) renderIfVisible();
   refreshing = false;
 }
 
@@ -2612,15 +2698,115 @@ function populatePinnedOptions(): void {
   }
 }
 
+function renderTracking(): string {
+  if (!lastTracking) return "";
+  const filtered = filterTracking(lastTracking, trackingDevice);
+  const summary = trackingSummary(filtered);
+  const chart = buildTrackingSeries(filtered, {
+    range: trackingRange,
+    metric: trackingMetric,
+    groupBy: trackingGroup,
+  });
+  const deviceChip = (id: string, label: string) =>
+    `<button class="tracking-chip${trackingDevice === id ? " active" : ""}" data-track-device="${escapeHtml(id)}" aria-pressed="${trackingDevice === id}">${escapeHtml(label)}</button>`;
+  const option = (kind: string, value: string | number, label: string, active: boolean) =>
+    `<button class="tracking-option${active ? " active" : ""}" data-track-${kind}="${value}" aria-pressed="${active}">${label}</button>`;
+
+  const dailyTotals = chart.days.map((_, index) =>
+    chart.series.reduce((sum, series) => sum + series.values[index], 0),
+  );
+  const max = Math.max(...dailyTotals, 1);
+  const plotTop = 8;
+  const plotHeight = 72;
+  const slot = chart.days.length ? 286 / chart.days.length : 286;
+  const barWidth = Math.max(2, Math.min(18, slot - 3));
+  const segments: string[] = [];
+  chart.days.forEach((day, dayIndex) => {
+    let bottom = plotTop + plotHeight;
+    chart.series.forEach((series, seriesIndex) => {
+      const value = series.values[dayIndex];
+      if (value <= 0) return;
+      const height = Math.max(2, (value / max) * plotHeight);
+      bottom -= height;
+      const label = `${day}, ${series.label}: ${trackingMetric === "tokens" ? fmtTokens(value) : fmtMoney(value)}`;
+      segments.push(
+        `<rect class="tracking-segment series-${seriesIndex % 8}" x="${(7 + dayIndex * slot).toFixed(2)}" y="${bottom.toFixed(2)}" width="${barWidth.toFixed(2)}" height="${height.toFixed(2)}" rx="2" tabindex="0" role="img" aria-label="${escapeHtml(label)}"><title>${escapeHtml(label)}</title></rect>`,
+      );
+    });
+  });
+  const peakIndex = dailyTotals.indexOf(Math.max(...dailyTotals));
+  const accessibleSummary = chart.days.length
+    ? `${trackingRange}-day ${trackingMetric} trend. Total ${trackingMetric === "tokens" ? fmtTokens(summary.tokens) : fmtMoney(summary.cost)}. Peak ${chart.days[peakIndex]} with ${trackingMetric === "tokens" ? fmtTokens(dailyTotals[peakIndex]) : fmtMoney(dailyTotals[peakIndex])}.`
+    : "No synchronized tracking rows in this range.";
+  const legend = chart.series
+    .map(
+      (series, index) =>
+        `<span class="tracking-legend-item"><i class="series-${index % 8}"></i>${escapeHtml(series.label)}</span>`,
+    )
+    .join("");
+  const quotaRows = selectQuotaRows(lastTracking, trackingDevice)
+    .map((quota) => {
+      const observed = new Date(quota.observed_at_ms).toLocaleString();
+      return `<div class="tracking-quota${quota.disagreement ? " disagreement" : ""}">
+        <div><strong>${escapeHtml(quota.provider_id)} · ${escapeHtml(quota.metric_id)}</strong><span>${quota.used_percent.toFixed(0)}% used</span></div>
+        <div class="tracking-quota-bar"><i style="width:${Math.max(0, Math.min(100, quota.used_percent))}%"></i></div>
+        <small>Read-only from ${escapeHtml(quota.source_device_label)} · ${escapeHtml(observed)}${quota.disagreement ? ` · ${escapeHtml(quotaDisagreementCopy(quota))}` : ""}</small>
+      </div>`;
+    })
+    .join("");
+  const details = [...filtered.days]
+    .sort((left, right) => right.day.localeCompare(left.day) || right.tokens - left.tokens)
+    .slice(0, 12)
+    .map(
+      (row) => `<tr><td>${escapeHtml(row.day.slice(5))}</td><td>${escapeHtml(row.device_label)}</td><td>${escapeHtml(row.provider_id)}</td><td title="${escapeHtml(row.model)}">${escapeHtml(row.model)}</td><td>${fmtTokens(row.tokens)}</td><td>${fmtMoney(row.cost)}</td></tr>`,
+    )
+    .join("");
+
+  return `<article class="provider tracking-card">
+    <div class="provider-head"><span class="provider-name">Cross-device Tracking</span><span class="spacer"></span>${lastTracking.legacy_present ? '<span class="tracking-badge">Legacy overlap</span>' : ""}</div>
+    <div class="tracking-filters" aria-label="Device filter">
+      ${deviceChip("all", "All Devices")}${lastTracking.devices.map((device) => deviceChip(device.device_id, device.label)).join("")}
+    </div>
+    <div class="tracking-summary">
+      <span><strong>${summary.devices}</strong> devices</span><span><strong>${summary.events}</strong> events</span><span><strong>${fmtTokens(summary.tokens)}</strong> tokens</span><span><strong>${fmtMoney(summary.cost)}</strong> spend</span>
+    </div>
+    ${lastTracking.quarantined_devices.length ? '<p class="tracking-warning">A device update was quarantined; its last-good data remains visible.</p>' : ""}
+    <div class="tracking-controls">
+      <div>${option("range", 7, "7 Days", trackingRange === 7)}${option("range", 30, "30 Days", trackingRange === 30)}</div>
+      <div>${option("metric", "tokens", "Tokens", trackingMetric === "tokens")}${option("metric", "spend", "Spend", trackingMetric === "spend")}</div>
+      <div>${option("group", "device", "Device", trackingGroup === "device")}${option("group", "provider", "Provider", trackingGroup === "provider")}</div>
+    </div>
+    <div class="tracking-chart-wrap">
+      <svg class="tracking-chart" viewBox="0 0 300 92" preserveAspectRatio="none" aria-hidden="true"><line x1="6" y1="80" x2="296" y2="80"/>${segments.join("")}</svg>
+      <p class="sr-only">${escapeHtml(accessibleSummary)}</p>
+      <div class="tracking-legend">${legend}</div>
+    </div>
+    ${quotaRows ? `<div class="tracking-quotas"><h4>Quota observations</h4>${quotaRows}</div>` : ""}
+    <details class="tracking-details"><summary>Daily details</summary><div class="tracking-table-wrap"><table><thead><tr><th>Day</th><th>Device</th><th>Provider</th><th>Model</th><th>Tokens</th><th>Spend</th></tr></thead><tbody>${details || '<tr><td colspan="6">No synchronized rows.</td></tr>'}</tbody></table></div></details>
+  </article>`;
+}
+
 async function loadSyncStatus(): Promise<SyncStatus> {
   const status = await invoke<SyncStatus>("sync_status");
   config.syncEnabled = status.enabled;
   config.syncHubUrl = status.hub_url;
   document.querySelector<HTMLInputElement>("#sync-hub-url")!.value = status.hub_url;
   document.querySelector<HTMLElement>("#sync-summary")!.textContent = renderSyncSummary(status);
-  document.querySelector<HTMLElement>("#sync-device-list")!.textContent = status.device_id
-    ? `Devices: ${status.device_id} (this PC)`
-    : "No enrolled devices on this PC.";
+  document.querySelector<HTMLInputElement>("#sync-device-label")!.value = status.device_label;
+  document.querySelector<HTMLElement>("#sync-device-list")!.innerHTML = status.devices.length
+    ? status.devices
+        .map(
+          (device) => `<div class="sync-device-row">
+            <strong>${escapeHtml(device.label)}</strong>
+            <span>${escapeHtml(shortDeviceRef(device.device_id))} · client ${escapeHtml(device.client_version)} · ${escapeHtml(device.protocol_version)}</span>
+            <small>Generated ${escapeHtml(new Date(device.last_generated_ms).toLocaleString())} · received ${escapeHtml(new Date(device.last_received_ms).toLocaleString())}</small>
+            <em class="sync-state ${escapeHtml(device.state)}">${escapeHtml(deviceStateLabel(device.state))}</em>
+          </div>`,
+        )
+        .join("")
+    : status.device_id
+      ? `This PC is enrolled as ${escapeHtml(shortDeviceRef(status.device_id))}; device tracking appears after its first sync.`
+      : "No enrolled devices on this PC.";
   document.querySelector<HTMLButtonElement>("#sync-now")!.disabled = !status.enabled;
   document.querySelector<HTMLButtonElement>("#sync-revoke")!.disabled = !status.device_id;
   document.querySelector<HTMLButtonElement>("#sync-disable")!.disabled = !status.enabled;
@@ -2632,6 +2818,17 @@ async function initSyncSettings(): Promise<void> {
   document.querySelector<HTMLElement>("#sync-recovery-notice")!.textContent = recoveryKeyNotice();
   await loadSyncStatus().catch((error) => {
     document.querySelector<HTMLElement>("#sync-summary")!.textContent = `Sync unavailable: ${error}`;
+  });
+
+  document.querySelector<HTMLButtonElement>("#sync-save-label")!.addEventListener("click", async () => {
+    const input = document.querySelector<HTMLInputElement>("#sync-device-label")!;
+    try {
+      await invoke("sync_set_device_label", { label: input.value });
+      statusLine.textContent = "Device label saved; it will publish on the next sync";
+      await loadSyncStatus();
+    } catch (error) {
+      statusLine.textContent = `Device label failed: ${error}`;
+    }
   });
 
   document.querySelector<HTMLButtonElement>("#sync-enroll")!.addEventListener("click", async () => {
@@ -2668,12 +2865,12 @@ async function initSyncSettings(): Promise<void> {
     });
 
   document.querySelector<HTMLButtonElement>("#sync-now")!.addEventListener("click", async () => {
-    statusLine.textContent = "Syncing encrypted history…";
+    statusLine.textContent = "Syncing encrypted history and tracking…";
     try {
       await invoke("sync_now");
       await loadSyncStatus();
       await refresh(true);
-      statusLine.textContent = "Encrypted history synchronized";
+      statusLine.textContent = "Encrypted history and tracking synchronized";
     } catch (error) {
       statusLine.textContent = `Sync failed: ${error}`;
     }
@@ -3042,6 +3239,31 @@ window.addEventListener("DOMContentLoaded", () => {
 
   providersEl.addEventListener("click", (e) => {
     const target = e.target as HTMLElement;
+
+    const deviceFilter = target.closest<HTMLElement>("[data-track-device]");
+    if (deviceFilter) {
+      trackingDevice = deviceFilter.dataset.trackDevice ?? "all";
+      renderAll();
+      return;
+    }
+    const range = target.closest<HTMLElement>("[data-track-range]");
+    if (range) {
+      trackingRange = Number(range.dataset.trackRange) === 30 ? 30 : 7;
+      renderAll();
+      return;
+    }
+    const metric = target.closest<HTMLElement>("[data-track-metric]");
+    if (metric) {
+      trackingMetric = metric.dataset.trackMetric === "spend" ? "spend" : "tokens";
+      renderAll();
+      return;
+    }
+    const group = target.closest<HTMLElement>("[data-track-group]");
+    if (group) {
+      trackingGroup = group.dataset.trackGroup === "provider" ? "provider" : "device";
+      renderAll();
+      return;
+    }
 
     const link = target.closest<HTMLElement>("[data-link]");
     if (link) {
