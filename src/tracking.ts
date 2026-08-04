@@ -59,6 +59,26 @@ export interface TrackingSeries {
   values: number[];
 }
 
+export async function refreshTrackingState(
+  current: TrackingDashboard | null,
+  selectedDevice: DeviceFilter,
+  load: () => Promise<TrackingDashboard | null>,
+): Promise<{ tracking: TrackingDashboard | null; device: DeviceFilter }> {
+  let incoming: TrackingDashboard | null = null;
+  try {
+    incoming = await load();
+  } catch {
+    // Keep the last-good projection when the backend is temporarily unavailable.
+  }
+  const tracking = incoming ?? current;
+  const device =
+    selectedDevice !== "all" &&
+    tracking?.devices.some((candidate) => candidate.device_id === selectedDevice)
+      ? selectedDevice
+      : "all";
+  return { tracking, device };
+}
+
 export function filterTracking(
   data: TrackingDashboard,
   deviceId: string,

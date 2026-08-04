@@ -4,6 +4,7 @@ import {
   escapeTrackingHtml,
   filterTracking,
   quotaDisagreementCopy,
+  refreshTrackingState,
   selectQuotaRows,
   trackingSummary,
   type TrackingDashboard,
@@ -93,6 +94,24 @@ describe("cross-device tracking model", () => {
     expect(escapeTrackingHtml('<img src=x onerror="boom">')).toBe(
       "&lt;img src=x onerror=&quot;boom&quot;&gt;",
     );
+  });
+
+  it("loads the latest projection when the popover opens and resets a missing device filter", async () => {
+    let loads = 0;
+    const result = await refreshTrackingState(null, "device-stale", async () => {
+      loads += 1;
+      return data;
+    });
+
+    expect(loads).toBe(1);
+    expect(result.tracking).toBe(data);
+    expect(result.device).toBe("all");
+  });
+
+  it("keeps the last projection when the on-open refresh is unavailable", async () => {
+    const result = await refreshTrackingState(data, "device-laptop", async () => null);
+
+    expect(result).toEqual({ tracking: data, device: "device-laptop" });
   });
 });
 

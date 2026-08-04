@@ -26,6 +26,7 @@ import {
   buildTrackingSeries,
   filterTracking,
   quotaDisagreementCopy,
+  refreshTrackingState,
   selectQuotaRows,
   trackingSummary,
   type TrackingDashboard,
@@ -2192,6 +2193,15 @@ function renderIfVisible(): void {
   populatePinnedOptions();
 }
 
+async function refreshTrackingOnly(): Promise<void> {
+  const next = await refreshTrackingState(lastTracking, trackingDevice, () =>
+    invoke<TrackingDashboard>("fetch_tracking").catch(() => null),
+  );
+  lastTracking = next.tracking;
+  trackingDevice = next.device;
+  if (!customizeOpen && lastTracking) renderIfVisible();
+}
+
 async function refresh(force = false): Promise<void> {
   if (refreshing) return;
   if (!force && Date.now() - lastFetch < STALE_MS) return;
@@ -3408,6 +3418,7 @@ window.addEventListener("DOMContentLoaded", () => {
     providersEl.scrollTop = 0;
     updateTrailActive();
     if (lastSnapshots.length && !customizeOpen) playReveal();
+    void refreshTrackingOnly();
     void refresh();
   });
   void initSettings().then(() => {
