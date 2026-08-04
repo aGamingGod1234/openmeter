@@ -2,7 +2,8 @@
 param(
     [string]$OutputRoot,
     [string]$Subject = 'CN=OpenMeter Private Deployment',
-    [string]$PrebuiltRoot
+    [string]$PrebuiltRoot,
+    [ValidateRange(0, 65535)][int]$PackageRevision = 2
 )
 
 $ErrorActionPreference = 'Stop'
@@ -28,7 +29,7 @@ $parts = @([string]$config.version -split '\.')
 if ($parts.Count -ne 3 -or ($parts | Where-Object { $_ -notmatch '^\d+$' })) {
     throw "Tauri version must be numeric SemVer: $($config.version)"
 }
-$msixVersion = '{0}.{1}.{2}.0' -f $parts[0], $parts[1], $parts[2]
+$msixVersion = '{0}.{1}.{2}.{3}' -f $parts[0], $parts[1], $parts[2], $PackageRevision
 $certificate = Get-OrCreateOpenMeterSigningCertificate -Subject $Subject
 
 $binaries = @{}

@@ -21,11 +21,11 @@ A PowerShell build script will:
 5. Create and sign an x64 MSIX package.
 6. Export only the public `.cer` file alongside the package and write SHA-256 checksums.
 
-The package launches the tray executable. The CLI and sync-hub executable remain packaged resources and retain their current behavior. Hub service installation stays an explicit administrator operation performed by the existing hub installer; MSIX installation will not silently create a service.
+The package launches the tray executable. The CLI and sync-hub executable remain signed packaged resources. The target Enterprise Code Integrity policy permits the tray through packaged activation but rejects direct native CLI execution with event 3077 until the publisher is publicly trusted, so this private package does not expose a broken CLI alias. Hub service installation stays an explicit administrator operation performed by the existing hub installer; MSIX installation will not silently create a service.
 
 ## Installation and removal
 
-A separate installer script verifies the package signature and expected certificate thumbprint, imports the public certificate into the narrowest usable Windows trust store, installs the package for the current user, launches OpenMeter, and verifies the local API. It fails closed on a signature mismatch, an untrusted package, a blocked executable, or a failed health check.
+A separate installer script verifies the package signature and expected certificate thumbprint, uses an administrator-approved helper to import the public certificate into `LocalMachine\TrustedPeople` (the narrowest store accepted by the Windows AppX deployment service for this self-signed publisher), installs the package for the current user, launches OpenMeter, and verifies the local API. It fails closed on a signature mismatch, an untrusted package, a blocked executable, or a failed health check.
 
 Removal uses normal Windows package removal. The public certificate is removed only through a separate explicit cleanup switch so uninstalling OpenMeter does not unexpectedly alter trust state used by another installed version.
 
@@ -42,4 +42,3 @@ Automated tests will exercise the scripts against temporary certificate stores a
 - Uninstall removes the package while preserving user data.
 
 If Windows policy rejects the explicitly trusted private certificate, the scripts stop and report that evidence. They will not add App Control exceptions or disable security features. In that case, the remaining safe routes are a publicly trusted certificate or Microsoft Store signing.
-

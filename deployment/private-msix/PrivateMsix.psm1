@@ -188,10 +188,154 @@ function Assert-OpenMeterPrebuiltSet {
     return $verified
 }
 
+function Test-OpenMeterPrivatePackage {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$PackagePath,
+        [Parameter(Mandatory)][string]$CertificatePath,
+        [Parameter(Mandatory)][ValidatePattern('^[0-9A-Fa-f]{40}$')][string]$ExpectedThumbprint
+    )
+
+    if (-not (Test-Path -LiteralPath $CertificatePath -PathType Leaf)) {
+        throw "Public certificate does not exist: $CertificatePath"
+    }
+    $certificate = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($CertificatePath)
+    $normalizedThumbprint = $ExpectedThumbprint.ToUpperInvariant()
+    if ($certificate.Thumbprint -ne $normalizedThumbprint) {
+        throw 'Public certificate does not match the expected thumbprint.'
+    }
+    if (-not (Test-Path -LiteralPath $PackagePath -PathType Leaf)) {
+        throw "MSIX package does not exist: $PackagePath"
+    }
+
+    $signature = Assert-OpenMeterSignature -Path $PackagePath -Thumbprint $normalizedThumbprint
+
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $archive = [System.IO.Compression.ZipFile]::OpenRead($PackagePath)
+    try {
+        $entry = $archive.GetEntry('AppxManifest.xml')
+        if (-not $entry) { throw 'MSIX has no AppxManifest.xml.' }
+        $reader = New-Object System.IO.StreamReader($entry.Open())
+        try { [xml]$manifest = $reader.ReadToEnd() } finally { $reader.Dispose() }
+    }
+    finally {
+        $archive.Dispose()
+    }
+
+    $namespace = New-Object System.Xml.XmlNamespaceManager($manifest.NameTable)
+    $namespace.AddNamespace('a', 'http://schemas.microsoft.com/appx/manifest/foundation/windows10')
+    $identity = $manifest.SelectSingleNode('/a:Package/a:Identity', $namespace)
+    if (-not $identity) { throw 'MSIX manifest has no package identity.' }
+    if ($identity.Name -ne 'OpenMeter.Private') {
+        throw "Unexpected MSIX identity: $($identity.Name)"
+    }
+    if ($identity.Publisher -ne $certificate.Subject) {
+        throw 'MSIX publisher does not match the public certificate subject.'
+    }
+    if ($identity.ProcessorArchitecture -ne 'x64') {
+        throw "Unexpected MSIX architecture: $($identity.ProcessorArchitecture)"
+    }
+
+    return [pscustomobject]@{
+        PackagePath = [System.IO.Path]::GetFullPath($PackagePath)
+        CertificatePath = [System.IO.Path]::GetFullPath($CertificatePath)
+        Thumbprint = $certificate.Thumbprint
+        Publisher = $identity.Publisher
+        Identity = $identity.Name
+        Version = $identity.Version
+        SignatureStatus = $signature.Status.ToString()
+    }
+}
+
+function Assert-OpenMeterMsixTrust {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][ValidatePattern('^[0-9A-Fa-f]{40}$')][string]$Thumbprint,
+        [string]$StoreLocation = 'Cert:\LocalMachine\TrustedPeople'
+    )
+
+    if ($StoreLocation -notmatch '^Cert:\\(CurrentUser|LocalMachine)\\(TrustedPeople|Root)$') {
+        throw "Unsupported certificate store location: $StoreLocation"
+    }
+    $trustPath = Join-Path $StoreLocation $Thumbprint.ToUpperInvariant()
+    if (-not (Test-Path -LiteralPath $trustPath -PathType Leaf)) {
+        throw "OpenMeter publisher certificate is not trusted for the current user: $Thumbprint"
+    }
+    return Get-Item -LiteralPath $trustPath
+}
+
+function Install-OpenMeterPrivateMsix {
+    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'Medium')]
+    param(
+        [Parameter(Mandatory)][string]$PackagePath,
+        [Parameter(Mandatory)][string]$CertificatePath,
+        [Parameter(Mandatory)][ValidatePattern('^[0-9A-Fa-f]{40}$')][string]$ExpectedThumbprint,
+        [int]$HealthTimeoutSeconds = 45
+    )
+
+    $validated = Test-OpenMeterPrivatePackage `
+        -PackagePath $PackagePath `
+        -CertificatePath $CertificatePath `
+        -ExpectedThumbprint $ExpectedThumbprint
+    if (-not $PSCmdlet.ShouldProcess('CurrentUser OpenMeter package', 'Install private MSIX')) {
+        return $validated
+    }
+
+    $thumbprint = $validated.Thumbprint
+    $installed = $false
+    try {
+        Assert-OpenMeterMsixTrust -Thumbprint $thumbprint | Out-Null
+
+        Get-Process -Name 'openmeter-tray' -ErrorAction SilentlyContinue | Stop-Process -Force
+        Add-AppxPackage -Path $PackagePath -ForceApplicationShutdown -ForceUpdateFromAnyVersion
+        $installed = $true
+
+        $package = Get-AppxPackage -Name 'OpenMeter.Private' | Sort-Object Version -Descending | Select-Object -First 1
+        if (-not $package) { throw 'OpenMeter.Private was not registered after Add-AppxPackage.' }
+        Start-Process explorer.exe -ArgumentList "shell:AppsFolder\$($package.PackageFamilyName)!OpenMeter"
+
+        $deadline = [DateTime]::UtcNow.AddSeconds($HealthTimeoutSeconds)
+        $statusCode = 0
+        do {
+            try {
+                $response = Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:6736/v1/limits' -TimeoutSec 3
+                $statusCode = [int]$response.StatusCode
+            }
+            catch {
+                Start-Sleep -Milliseconds 500
+            }
+        } while ($statusCode -ne 200 -and [DateTime]::UtcNow -lt $deadline)
+        if ($statusCode -ne 200) { throw 'OpenMeter local API did not return HTTP 200 after installation.' }
+
+        $dataRoot = [System.IO.Path]::GetFullPath((Join-Path $env:APPDATA 'OpenMeter'))
+        if ($env:OneDrive -and $dataRoot.StartsWith([System.IO.Path]::GetFullPath($env:OneDrive), [StringComparison]::OrdinalIgnoreCase)) {
+            throw "OpenMeter data root is inside OneDrive: $dataRoot"
+        }
+
+        return [pscustomobject]@{
+            PackageFullName = $package.PackageFullName
+            PackageFamilyName = $package.PackageFamilyName
+            InstallLocation = $package.InstallLocation
+            Thumbprint = $thumbprint
+            ApiStatus = $statusCode
+            DataRoot = $dataRoot
+        }
+    }
+    catch {
+        if ($installed) {
+            Get-AppxPackage -Name 'OpenMeter.Private' -ErrorAction SilentlyContinue | Remove-AppxPackage -ErrorAction SilentlyContinue
+        }
+        throw
+    }
+}
+
 Export-ModuleMember -Function @(
     'Resolve-WindowsSdkTool',
     'New-OpenMeterMsixLayout',
     'Get-OrCreateOpenMeterSigningCertificate',
     'Assert-OpenMeterSignature',
-    'Assert-OpenMeterPrebuiltSet'
+    'Assert-OpenMeterPrebuiltSet',
+    'Test-OpenMeterPrivatePackage',
+    'Assert-OpenMeterMsixTrust',
+    'Install-OpenMeterPrivateMsix'
 )

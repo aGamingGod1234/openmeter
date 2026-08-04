@@ -2,7 +2,9 @@
 param(
     [switch]$LayoutOnly,
     [switch]$SigningOnly,
-    [switch]$InstallOnly
+    [switch]$InstallOnly,
+    [string]$PackagePath,
+    [string]$CertificatePath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -82,6 +84,7 @@ function Test-Signing {
     $subject = "CN=OpenMeter Private MSIX Test $suffix"
     $scratch = Join-Path ([System.IO.Path]::GetTempPath()) "openmeter-msix-signing-$suffix"
     $thumbprint = $null
+    $trustedThumbprint = $null
     try {
         New-Item -ItemType Directory -Path $scratch | Out-Null
         $first = Get-OrCreateOpenMeterSigningCertificate -Subject $subject
@@ -121,6 +124,15 @@ function Test-Signing {
         try { Assert-OpenMeterSignature -Path $unsigned -Thumbprint $thumbprint } catch { $rejected = $true }
         Assert-True $rejected 'Unsigned payload was accepted'
 
+        $publicCertificate = Join-Path $scratch 'test-public.cer'
+        Export-Certificate -Cert $first -FilePath $publicCertificate -Type CERT -Force | Out-Null
+        $notTrustedRejected = $false
+        try { Assert-OpenMeterMsixTrust -Thumbprint $thumbprint -StoreLocation 'Cert:\CurrentUser\TrustedPeople' } catch { $notTrustedRejected = $true }
+        Assert-True $notTrustedRejected 'Certificate missing from the selected test store was accepted'
+        Import-Certificate -FilePath $publicCertificate -CertStoreLocation 'Cert:\CurrentUser\TrustedPeople' | Out-Null
+        $trustedThumbprint = $thumbprint
+        Assert-OpenMeterMsixTrust -Thumbprint $thumbprint -StoreLocation 'Cert:\CurrentUser\TrustedPeople' | Out-Null
+
         $prebuilt = Join-Path $scratch 'prebuilt'
         New-Item -ItemType Directory -Path $prebuilt | Out-Null
         $checksumLines = foreach ($name in 'openmeter-tray.exe', 'openmeter.exe', 'openmeter-sync-hub.exe') {
@@ -139,6 +151,9 @@ function Test-Signing {
         Assert-True $tamperRejected 'Tampered prebuilt binary was accepted'
     }
     finally {
+        if ($trustedThumbprint -and (Test-Path -LiteralPath "Cert:\CurrentUser\TrustedPeople\$trustedThumbprint")) {
+            Remove-Item -LiteralPath "Cert:\CurrentUser\TrustedPeople\$trustedThumbprint" -Force
+        }
         if ($thumbprint -and (Test-Path -LiteralPath "Cert:\CurrentUser\My\$thumbprint")) {
             Remove-Item -LiteralPath "Cert:\CurrentUser\My\$thumbprint" -Force
         }
@@ -148,8 +163,81 @@ function Test-Signing {
     }
 }
 
+function Test-InstallValidation {
+    if (-not $PackagePath) {
+        $metadataPath = Join-Path $repoRoot 'artifacts\private-msix\deployment.json'
+        if (-not (Test-Path -LiteralPath $metadataPath -PathType Leaf)) {
+            throw 'A built private package is required for install validation tests.'
+        }
+        $metadata = Get-Content -Raw -LiteralPath $metadataPath | ConvertFrom-Json
+        $script:PackagePath = [string]$metadata.package
+        $script:CertificatePath = [string]$metadata.certificate
+    }
+
+    $certificate = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($CertificatePath)
+    $trustedBefore = Test-Path -LiteralPath "Cert:\LocalMachine\TrustedPeople\$($certificate.Thumbprint)"
+    $scratch = Join-Path ([System.IO.Path]::GetTempPath()) ("openmeter-msix-install-test-{0}" -f [guid]::NewGuid().ToString('N'))
+    try {
+        $validated = Test-OpenMeterPrivatePackage `
+            -PackagePath $PackagePath `
+            -CertificatePath $CertificatePath `
+            -ExpectedThumbprint $certificate.Thumbprint
+        Assert-Equal $validated.Thumbprint $certificate.Thumbprint 'Validated thumbprint mismatch'
+        Assert-Equal $validated.Publisher $certificate.Subject 'Manifest publisher does not match certificate subject'
+
+        $installedBefore = @(Get-AppxPackage -Name 'OpenMeter.Private' -ErrorAction SilentlyContinue).Count
+        Install-OpenMeterPrivateMsix `
+            -PackagePath $PackagePath `
+            -CertificatePath $CertificatePath `
+            -ExpectedThumbprint $certificate.Thumbprint `
+            -WhatIf | Out-Null
+        $installedAfter = @(Get-AppxPackage -Name 'OpenMeter.Private' -ErrorAction SilentlyContinue).Count
+        Assert-Equal $installedAfter $installedBefore 'Installer dry run changed package registration'
+
+        $wrongThumbprintRejected = $false
+        try {
+            Test-OpenMeterPrivatePackage `
+                -PackagePath (Join-Path $scratch 'missing.msix') `
+                -CertificatePath $CertificatePath `
+                -ExpectedThumbprint ('0' * 40) | Out-Null
+        }
+        catch { $wrongThumbprintRejected = $true }
+        Assert-True $wrongThumbprintRejected 'Wrong certificate thumbprint was accepted'
+
+        New-Item -ItemType Directory -Path $scratch -Force | Out-Null
+        $tamperedPackage = Join-Path $scratch 'tampered.msix'
+        Copy-Item -LiteralPath $PackagePath -Destination $tamperedPackage
+        $stream = [System.IO.File]::Open($tamperedPackage, [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+        try {
+            $stream.Position = [Math]::Min(128, $stream.Length - 1)
+            $original = $stream.ReadByte()
+            $stream.Position--
+            $stream.WriteByte([byte]($original -bxor 0xff))
+        }
+        finally { $stream.Dispose() }
+        $tamperRejected = $false
+        try {
+            Test-OpenMeterPrivatePackage `
+                -PackagePath $tamperedPackage `
+                -CertificatePath $CertificatePath `
+                -ExpectedThumbprint $certificate.Thumbprint | Out-Null
+        }
+        catch { $tamperRejected = $true }
+        Assert-True $tamperRejected 'Tampered MSIX was accepted'
+    }
+    finally {
+        $trustedAfter = Test-Path -LiteralPath "Cert:\LocalMachine\TrustedPeople\$($certificate.Thumbprint)"
+        Assert-Equal $trustedAfter $trustedBefore 'Validation test changed persistent certificate trust'
+        if (Test-Path -LiteralPath $scratch) {
+            Remove-Item -LiteralPath $scratch -Recurse -Force
+        }
+    }
+}
+
 if ($InstallOnly) {
-    throw 'Install tests have not been implemented yet.'
+    Test-InstallValidation
+    Write-Host 'Private MSIX install validation tests passed.'
+    exit 0
 }
 
 if ($SigningOnly) {
@@ -159,5 +247,8 @@ if ($SigningOnly) {
 }
 
 Test-Layout
-if (-not $LayoutOnly) { Test-Signing }
+if (-not $LayoutOnly) {
+    Test-Signing
+    Test-InstallValidation
+}
 Write-Host 'Private MSIX tests passed.'

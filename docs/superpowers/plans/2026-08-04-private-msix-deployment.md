@@ -123,7 +123,7 @@ Expected: FAIL because installation functions do not exist.
 
 - [ ] **Step 3: Implement verified install and explicit uninstall**
 
-Validate SHA-256/thumbprint and package signature, import the public certificate into `Cert:\CurrentUser\TrustedPeople`, call `Add-AppxPackage`, launch the registered app, and poll `http://127.0.0.1:6736/v1/limits` for HTTP 200. The uninstall script removes `OpenMeter.Private` for the current user; `-RemoveCertificate` is an explicit separate switch.
+Validate SHA-256/thumbprint and package signature, import the public certificate into `Cert:\LocalMachine\TrustedPeople` through an administrator-approved helper (the AppX service rejected both current-user stores with `0x800B0109`), call `Add-AppxPackage`, launch the registered app, and poll `http://127.0.0.1:6736/v1/limits` for HTTP 200. The uninstall script removes `OpenMeter.Private` for the current user; `-RemoveCertificate` is an explicit separate switch.
 
 - [ ] **Step 4: Run installer tests and verify GREEN**
 
@@ -152,4 +152,3 @@ Expected: every command exits 0 with no test failures.
 - [ ] **Step 8: Commit Task 3**
 
 Run: `git add deployment/private-msix scripts/test-private-msix.ps1 && git commit -m "feat: verify private MSIX installation"`
-
