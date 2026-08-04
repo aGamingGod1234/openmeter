@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.5.0 - 2026-08-04
+
+### Added
+- **Encrypted cross-device tracking** - Laptop and Desktop publish normalized,
+  privacy-safe usage facts through the Mini PC Tailscale hub. Event IDs are
+  keyed and deduplicated without uploading raw prompts, paths, credentials, or
+  account labels. Encrypted last-good peer state keeps dashboards available
+  while the hub is offline.
+- **Combined tracking dashboard** - All Devices, Laptop, and Desktop filters;
+  7/30-day Tokens or Spend graphs grouped by device or provider; daily detail;
+  freshest quota observations; and device freshness/upgrade status.
+- **Recoverable hub upgrades** - timestamped database backup with matching
+  SHA-256 and read-only integrity verification, unchanged pepper enforcement,
+  retained previous binary, and disposable dual-device v1/v2 acceptance.
+
+### Security
+- Version-two tracking envelopes use a separately derived XChaCha20-Poly1305
+  key, strict schema/revision validation, collision quarantine, bounded
+  retention, and independent revocation. Recovery keys remain client-only and
+  must be imported through the local OpenMeter UI.
+
 ## 0.4.28 — 2026-07-31
 
 ### Added

@@ -13,22 +13,39 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          workspaces: |
+            src-tauri
+            crates/openmeter-sync-protocol
+            sync-hub
       - name: Check maintained Rust formatting
         shell: pwsh
         run: |
-          rustfmt --edition 2021 --check --config skip_children=true `
-            src-tauri/src/accounts.rs `
-            src-tauri/src/cache.rs `
-            src-tauri/src/contracts.rs `
-            src-tauri/src/httpapi.rs `
-            src-tauri/src/platform.rs `
-            src-tauri/src/redaction.rs `
-            src-tauri/src/refresh.rs `
-            src-tauri/src/bin/openmeter.rs
+          $formatFiles = @(
+            (Get-ChildItem crates/openmeter-sync-protocol/src -Filter *.rs).FullName
+            (Get-ChildItem sync-hub/src -Filter *.rs).FullName
+            'crates/openmeter-sync-protocol/examples/tracking_fixture.rs'
+            'src-tauri/src/accounts.rs'
+            'src-tauri/src/cache.rs'
+            'src-tauri/src/contracts.rs'
+            'src-tauri/src/httpapi.rs'
+            'src-tauri/src/platform.rs'
+            'src-tauri/src/redaction.rs'
+            'src-tauri/src/refresh.rs'
+            'src-tauri/src/tracking_events.rs'
+            'src-tauri/src/tracking_projection.rs'
+            'src-tauri/src/sync_tracking.rs'
+            'src-tauri/src/bin/openmeter.rs'
+          )
+          foreach ($file in $formatFiles) {
+            rustfmt --edition 2021 --check --config skip_children=true $file
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
       - name: Check sync hub installer invariants
         shell: pwsh
-        run: .\scripts\test-sync-hub.ps1 -StaticOnly
+        run: |
+          .\scripts\test-sync-hub.ps1 -StaticOnly
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          .\scripts\test-cross-device-sync.ps1 -StaticOnly
       - name: Check trusted release invariants
         shell: pwsh
         run: |
