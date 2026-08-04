@@ -60,6 +60,9 @@ function Test-Layout {
         $ns.AddNamespace('desktop', 'http://schemas.microsoft.com/appx/manifest/desktop/windows10')
         $identity = $manifest.SelectSingleNode('/a:Package/a:Identity', $ns)
         $application = $manifest.SelectSingleNode('/a:Package/a:Applications/a:Application', $ns)
+        $startupExtension = $manifest.SelectSingleNode('/a:Package/a:Applications/a:Application/a:Extensions/desktop:Extension[@Category="windows.startupTask"]', $ns)
+        Assert-True ($null -ne $startupExtension) 'Packaged startup extension is missing'
+        $startupTask = $startupExtension.SelectSingleNode('desktop:StartupTask', $ns)
 
         Assert-Equal $identity.Name 'OpenMeter.Private' 'Unexpected package identity'
         Assert-Equal $identity.ProcessorArchitecture 'x64' 'Unexpected package architecture'
@@ -67,6 +70,12 @@ function Test-Layout {
         Assert-Equal $identity.Publisher 'CN=OpenMeter Private Deployment' 'Unexpected package publisher'
         Assert-Equal $application.Executable 'VFS\ProgramFilesX64\OpenMeter\openmeter-tray.exe' 'Unexpected app executable'
         Assert-Equal $application.EntryPoint 'Windows.FullTrustApplication' 'Unexpected entry point'
+        Assert-Equal $startupExtension.Executable 'VFS\ProgramFilesX64\OpenMeter\openmeter-tray.exe' 'Unexpected startup executable'
+        Assert-Equal $startupExtension.EntryPoint 'Windows.FullTrustApplication' 'Unexpected startup entry point'
+        Assert-True ($null -ne $startupTask) 'Packaged startup task is missing'
+        Assert-Equal $startupTask.TaskId 'OpenMeterStartup' 'Unexpected startup task identifier'
+        Assert-Equal $startupTask.Enabled 'true' 'Packaged startup task is not enabled by default'
+        Assert-Equal $startupTask.DisplayName 'OpenMeter' 'Unexpected startup task display name'
 
         $manifestText = Get-Content -Raw -LiteralPath (Join-Path $outputRoot 'AppxManifest.xml')
         Assert-True (-not $manifestText.Contains($env:USERNAME)) 'Manifest leaked the Windows username'
