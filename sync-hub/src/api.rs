@@ -26,7 +26,7 @@ const UPLOAD_INTERVAL_MS: i64 = 60 * 1_000;
 pub struct Hub {
     store: Arc<Store>,
     pepper: [u8; 32],
-    uploads: Arc<Mutex<HashMap<String, i64>>>,
+    uploads: Arc<Mutex<HashMap<(String, &'static str), i64>>>,
 }
 
 impl Hub {
@@ -60,6 +60,11 @@ pub fn router(hub: Hub) -> Router {
         .route("/v1/enroll", post(enroll))
         .route("/v1/envelopes", get(list_envelopes))
         .route("/v1/devices/{device_id}/envelope", put(put_envelope))
+        .route("/v2/envelopes", get(list_tracking_envelopes))
+        .route(
+            "/v2/devices/{device_id}/envelope",
+            put(put_tracking_envelope),
+        )
         .route("/v1/devices/{device_id}", delete(revoke_device))
         .layer(DefaultBodyLimit::max(MAX_ENVELOPE_WIRE_BYTES))
         .layer(TimeoutLayer::with_status_code(
@@ -122,16 +127,44 @@ async fn put_envelope(
 ) -> Result<StatusCode, ApiError> {
     authenticate(&hub, &headers, Some(&device_id))?;
     let now = now_ms()?;
+    rate_limited_upload(&hub, &device_id, "v1", now, || {
+        hub.store.put(&device_id, &envelope, now)
+    })?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn put_tracking_envelope(
+    State(hub): State<Hub>,
+    Path(device_id): Path<String>,
+    headers: HeaderMap,
+    Json(envelope): Json<EncryptedEnvelope>,
+) -> Result<StatusCode, ApiError> {
+    authenticate(&hub, &headers, Some(&device_id))?;
+    let now = now_ms()?;
+    rate_limited_upload(&hub, &device_id, "v2", now, || {
+        hub.store.put_tracking(&device_id, &envelope, now)
+    })?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+fn rate_limited_upload(
+    hub: &Hub,
+    device_id: &str,
+    version: &'static str,
+    now: i64,
+    store: impl FnOnce() -> Result<(), PutError>,
+) -> Result<(), ApiError> {
     let mut uploads = hub.uploads.lock().map_err(|_| ApiError::Unavailable)?;
+    let key = (device_id.to_owned(), version);
     if uploads
-        .get(&device_id)
+        .get(&key)
         .is_some_and(|previous| now.saturating_sub(*previous) < UPLOAD_INTERVAL_MS)
     {
         return Err(ApiError::TooManyRequests);
     }
-    hub.store.put(&device_id, &envelope, now)?;
-    uploads.insert(device_id, now);
-    Ok(StatusCode::NO_CONTENT)
+    store()?;
+    uploads.insert(key, now);
+    Ok(())
 }
 
 async fn list_envelopes(
@@ -140,6 +173,14 @@ async fn list_envelopes(
 ) -> Result<Json<Vec<EncryptedEnvelope>>, ApiError> {
     let device_id = authenticate(&hub, &headers, None)?;
     Ok(Json(hub.store.list_active(&device_id, now_ms()?)?))
+}
+
+async fn list_tracking_envelopes(
+    State(hub): State<Hub>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<crate::TrackingEnvelopeRecord>>, ApiError> {
+    let device_id = authenticate(&hub, &headers, None)?;
+    Ok(Json(hub.store.list_active_tracking(&device_id, now_ms()?)?))
 }
 
 async fn revoke_device(

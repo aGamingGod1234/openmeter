@@ -1,8 +1,11 @@
 use std::path::Path;
 use std::sync::Mutex;
 
-use openmeter_sync_protocol::{EncryptedEnvelope, MAX_ENVELOPE_BYTES, MAX_ENVELOPE_WIRE_BYTES};
+use openmeter_sync_protocol::{
+    EncryptedEnvelope, HISTORY_SCHEMA, MAX_ENVELOPE_BYTES, MAX_ENVELOPE_WIRE_BYTES, TRACKING_SCHEMA,
+};
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
+use serde::Serialize;
 use thiserror::Error;
 
 const RETENTION_MS: i64 = 30 * 24 * 60 * 60 * 1_000;
@@ -46,6 +49,18 @@ pub struct DeviceRecord {
     pub revoked: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TrackingEnvelopeRecord {
+    pub received_at_ms: i64,
+    pub envelope: EncryptedEnvelope,
+}
+
+#[derive(Clone, Copy)]
+enum EnvelopeTable {
+    History,
+    Tracking,
+}
+
 impl Store {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, HubError> {
         let connection = Connection::open(path).map_err(|_| HubError::Database)?;
@@ -59,6 +74,13 @@ impl Store {
                    revoked_at_ms INTEGER
                  );
                  CREATE TABLE IF NOT EXISTS envelopes (
+                   device_id TEXT PRIMARY KEY REFERENCES devices(device_id),
+                   revision INTEGER NOT NULL,
+                   generated_at_ms INTEGER NOT NULL,
+                   received_at_ms INTEGER NOT NULL,
+                   envelope_json BLOB NOT NULL
+                 );
+                 CREATE TABLE IF NOT EXISTS tracking_envelopes (
                    device_id TEXT PRIMARY KEY REFERENCES devices(device_id),
                    revision INTEGER NOT NULL,
                    generated_at_ms INTEGER NOT NULL,
@@ -165,10 +187,44 @@ impl Store {
         envelope: &EncryptedEnvelope,
         now_ms: i64,
     ) -> Result<(), PutError> {
+        self.put_in_table(
+            authenticated_device_id,
+            envelope,
+            now_ms,
+            EnvelopeTable::History,
+        )
+    }
+
+    pub fn put_tracking(
+        &self,
+        authenticated_device_id: &str,
+        envelope: &EncryptedEnvelope,
+        now_ms: i64,
+    ) -> Result<(), PutError> {
+        self.put_in_table(
+            authenticated_device_id,
+            envelope,
+            now_ms,
+            EnvelopeTable::Tracking,
+        )
+    }
+
+    fn put_in_table(
+        &self,
+        authenticated_device_id: &str,
+        envelope: &EncryptedEnvelope,
+        now_ms: i64,
+        table: EnvelopeTable,
+    ) -> Result<(), PutError> {
         if authenticated_device_id != envelope.meta.device_id {
             return Err(PutError::DeviceMismatch);
         }
+        let expected_schema = match table {
+            EnvelopeTable::History => HISTORY_SCHEMA,
+            EnvelopeTable::Tracking => TRACKING_SCHEMA,
+        };
         if validate_device_id(authenticated_device_id).is_err()
+            || envelope.meta.schema != expected_schema
             || envelope.meta.revision == 0
             || envelope.nonce.len() != 24
             || envelope.ciphertext.len() > MAX_ENVELOPE_BYTES
@@ -201,7 +257,12 @@ impl Store {
         }
         let current: Option<i64> = transaction
             .query_row(
-                "SELECT revision FROM envelopes WHERE device_id = ?1",
+                match table {
+                    EnvelopeTable::History => "SELECT revision FROM envelopes WHERE device_id = ?1",
+                    EnvelopeTable::Tracking => {
+                        "SELECT revision FROM tracking_envelopes WHERE device_id = ?1"
+                    }
+                },
                 [authenticated_device_id],
                 |row| row.get(0),
             )
@@ -216,13 +277,26 @@ impl Store {
         }
         transaction
             .execute(
-                "INSERT INTO envelopes(device_id, revision, generated_at_ms, received_at_ms, envelope_json)
-                 VALUES (?1, ?2, ?3, ?4, ?5)
-                 ON CONFLICT(device_id) DO UPDATE SET
-                   revision = excluded.revision,
-                   generated_at_ms = excluded.generated_at_ms,
-                   received_at_ms = excluded.received_at_ms,
-                   envelope_json = excluded.envelope_json",
+                match table {
+                    EnvelopeTable::History => {
+                        "INSERT INTO envelopes(device_id, revision, generated_at_ms, received_at_ms, envelope_json)
+                         VALUES (?1, ?2, ?3, ?4, ?5)
+                         ON CONFLICT(device_id) DO UPDATE SET
+                           revision = excluded.revision,
+                           generated_at_ms = excluded.generated_at_ms,
+                           received_at_ms = excluded.received_at_ms,
+                           envelope_json = excluded.envelope_json"
+                    }
+                    EnvelopeTable::Tracking => {
+                        "INSERT INTO tracking_envelopes(device_id, revision, generated_at_ms, received_at_ms, envelope_json)
+                         VALUES (?1, ?2, ?3, ?4, ?5)
+                         ON CONFLICT(device_id) DO UPDATE SET
+                           revision = excluded.revision,
+                           generated_at_ms = excluded.generated_at_ms,
+                           received_at_ms = excluded.received_at_ms,
+                           envelope_json = excluded.envelope_json"
+                    }
+                },
                 params![
                     authenticated_device_id,
                     revision,
@@ -262,6 +336,38 @@ impl Store {
         Ok(envelopes)
     }
 
+    pub fn list_active_tracking(
+        &self,
+        excluding_device: &str,
+        _now_ms: i64,
+    ) -> Result<Vec<TrackingEnvelopeRecord>, HubError> {
+        let connection = self.connection.lock().map_err(|_| HubError::Database)?;
+        let mut statement = connection
+            .prepare(
+                "SELECT e.received_at_ms, e.envelope_json
+                 FROM tracking_envelopes e
+                 JOIN devices d ON d.device_id = e.device_id
+                 WHERE d.revoked_at_ms IS NULL AND d.device_id <> ?1
+                 ORDER BY d.device_id",
+            )
+            .map_err(|_| HubError::Database)?;
+        let rows = statement
+            .query_map([excluding_device], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, Vec<u8>>(1)?))
+            })
+            .map_err(|_| HubError::Database)?;
+        let mut envelopes = Vec::new();
+        for row in rows {
+            let (received_at_ms, bytes) = row.map_err(|_| HubError::Database)?;
+            let envelope = serde_json::from_slice(&bytes).map_err(|_| HubError::InvalidRecord)?;
+            envelopes.push(TrackingEnvelopeRecord {
+                received_at_ms,
+                envelope,
+            });
+        }
+        Ok(envelopes)
+    }
+
     pub fn revoke(&self, device_id: &str, now_ms: i64) -> Result<(), HubError> {
         let mut connection = self.connection.lock().map_err(|_| HubError::Database)?;
         let transaction = connection
@@ -295,6 +401,15 @@ impl Store {
                 [cutoff],
             )
             .map_err(|_| HubError::Database)?;
+        transaction
+            .execute(
+                "DELETE FROM tracking_envelopes WHERE device_id IN (
+                   SELECT device_id FROM devices
+                   WHERE revoked_at_ms IS NOT NULL AND revoked_at_ms < ?1
+                 )",
+                [cutoff],
+            )
+            .map_err(|_| HubError::Database)?;
         transaction.commit().map_err(|_| HubError::Database)
     }
 
@@ -302,6 +417,15 @@ impl Store {
         let connection = self.connection.lock().map_err(|_| HubError::Database)?;
         connection
             .query_row("SELECT COUNT(*) FROM envelopes", [], |row| row.get(0))
+            .map_err(|_| HubError::Database)
+    }
+
+    pub fn tracking_envelope_count(&self) -> Result<u64, HubError> {
+        let connection = self.connection.lock().map_err(|_| HubError::Database)?;
+        connection
+            .query_row("SELECT COUNT(*) FROM tracking_envelopes", [], |row| {
+                row.get(0)
+            })
             .map_err(|_| HubError::Database)
     }
 }
