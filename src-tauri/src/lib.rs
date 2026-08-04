@@ -16,6 +16,7 @@ pub mod sync_client;
 pub mod sync_history;
 mod sync_runtime;
 pub mod tracking_events;
+pub mod tracking_projection;
 mod telemetry;
 pub mod updates;
 
