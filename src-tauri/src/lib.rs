@@ -15,6 +15,7 @@ pub mod spend;
 pub mod sync_client;
 pub mod sync_history;
 mod sync_runtime;
+pub mod sync_tracking;
 pub mod tracking_events;
 pub mod tracking_projection;
 mod telemetry;
@@ -26,7 +27,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
 use sync_runtime::{
-    sync_disable, sync_enroll, sync_import_recovery, sync_now, sync_revoke_device, sync_status,
+    fetch_tracking, sync_disable, sync_enroll, sync_import_recovery, sync_now,
+    sync_revoke_device, sync_set_device_label, sync_status,
 };
 use tauri::{
     menu::{Menu, MenuItem},
@@ -153,6 +155,9 @@ fn config_with_defaults(mut cfg: Value) -> Value {
     obj.entry("syncDeviceId").or_insert(json!(""));
     obj.entry("syncRevision").or_insert(json!(0));
     obj.entry("syncLastSuccess").or_insert(json!(0));
+    obj.entry("syncTrackingRevision").or_insert(json!(0));
+    obj.entry("syncTrackingLastSuccess").or_insert(json!(0));
+    obj.entry("syncDeviceLabel").or_insert(json!("This device"));
     cfg
 }
 
@@ -200,6 +205,9 @@ const CONFIG_KEYS: &[&str] = &[
     "syncDeviceId",
     "syncRevision",
     "syncLastSuccess",
+    "syncTrackingRevision",
+    "syncTrackingLastSuccess",
+    "syncDeviceLabel",
 ];
 
 #[tauri::command]
@@ -557,11 +565,11 @@ async fn fetch_usage(app: tauri::AppHandle) -> Vec<providers::Snapshot> {
         .unwrap_or_default();
 
     let mut all = refresh::refresh_default(false, None, &disabled).await;
-    if let Ok(registry) = accounts::AccountRegistry::load(&account_registry_path()) {
-        for snapshot in &mut all {
-            snapshot.name = registry.resolve_name(&snapshot.card_id, &snapshot.name);
-        }
+    let registry = accounts::AccountRegistry::load(&account_registry_path()).unwrap_or_default();
+    for snapshot in &mut all {
+        snapshot.name = registry.resolve_name(&snapshot.card_id, &snapshot.name);
     }
+    sync_tracking::replace_local_quotas(&all, &registry);
     let enabled_ids: Vec<String> = all
         .iter()
         .map(|snapshot| snapshot.provider_id.clone())
@@ -1028,7 +1036,9 @@ pub fn run() {
             sync_import_recovery,
             sync_now,
             sync_revoke_device,
-            sync_disable
+            sync_disable,
+            fetch_tracking,
+            sync_set_device_label
         ])
         .setup(|app| {
             spawn_update_checker(app.handle());

@@ -2,7 +2,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use openmeter_sync_protocol::{EncryptedEnvelope, MAX_ENVELOPE_BYTES};
+use openmeter_sync_protocol::{EncryptedEnvelope, MAX_ENVELOPE_BYTES, TRACKING_SCHEMA};
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use reqwest::{Client, StatusCode, Url};
 use serde::{Deserialize, Serialize};
@@ -85,6 +85,13 @@ impl RetryState {
 pub struct Enrollment {
     pub device_id: String,
     pub credential: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TrackingEnvelopeRecord {
+    pub received_at_ms: i64,
+    pub envelope: EncryptedEnvelope,
 }
 
 pub struct SyncClient {
@@ -191,6 +198,69 @@ impl SyncClient {
             return Err(SyncError::InvalidResponse);
         }
         serde_json::from_slice(&bytes).map_err(|_| SyncError::InvalidResponse)
+    }
+
+    pub async fn push_tracking(
+        &self,
+        device_id: &str,
+        credential: &str,
+        envelope: &EncryptedEnvelope,
+    ) -> Result<(), SyncError> {
+        if !valid_device_id(device_id)
+            || envelope.meta.device_id != device_id
+            || envelope.meta.schema != TRACKING_SCHEMA
+            || envelope.nonce.len() != 24
+            || envelope.ciphertext.len() > MAX_ENVELOPE_BYTES
+        {
+            return Err(SyncError::InvalidEnvelope);
+        }
+        let response = self
+            .http
+            .put(self.endpoint(&format!("v2/devices/{device_id}/envelope"))?)
+            .bearer_auth(credential)
+            .json(envelope)
+            .send()
+            .await
+            .map_err(|_| SyncError::Network)?;
+        response.error_for_status().map_err(map_status)?;
+        Ok(())
+    }
+
+    pub async fn pull_tracking(
+        &self,
+        credential: &str,
+    ) -> Result<Vec<TrackingEnvelopeRecord>, SyncError> {
+        let response = self
+            .http
+            .get(self.endpoint("v2/envelopes")?)
+            .header(AUTHORIZATION, format!("Bearer {credential}"))
+            .send()
+            .await
+            .map_err(|_| SyncError::Network)?
+            .error_for_status()
+            .map_err(map_status)?;
+        if response
+            .content_length()
+            .is_some_and(|length| length > MAX_PULL_BYTES as u64)
+        {
+            return Err(SyncError::InvalidResponse);
+        }
+        let bytes = response.bytes().await.map_err(|_| SyncError::Network)?;
+        if bytes.len() > MAX_PULL_BYTES {
+            return Err(SyncError::InvalidResponse);
+        }
+        let records: Vec<TrackingEnvelopeRecord> =
+            serde_json::from_slice(&bytes).map_err(|_| SyncError::InvalidResponse)?;
+        if records.iter().any(|record| {
+            record.received_at_ms < 0
+                || record.envelope.meta.schema != TRACKING_SCHEMA
+                || !valid_device_id(&record.envelope.meta.device_id)
+                || record.envelope.nonce.len() != 24
+                || record.envelope.ciphertext.len() > MAX_ENVELOPE_BYTES
+        }) {
+            return Err(SyncError::InvalidResponse);
+        }
+        Ok(records)
     }
 
     pub async fn revoke(&self, device_id: &str, credential: &str) -> Result<(), SyncError> {
