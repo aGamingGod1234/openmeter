@@ -264,6 +264,33 @@ function Assert-OpenMeterMsixTrust {
     return Get-Item -LiteralPath $trustPath
 }
 
+function Remove-OpenMeterLegacyStartup {
+    [CmdletBinding()]
+    param(
+        [string]$RunKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run',
+        [Parameter(Mandatory)][string]$ExpectedPath
+    )
+
+    if ($RunKey -notmatch '^HKCU:\\Software\\') {
+        throw "Legacy startup cleanup is restricted to HKCU\Software: $RunKey"
+    }
+    $property = Get-ItemProperty -LiteralPath $RunKey -Name 'OpenMeter' -ErrorAction SilentlyContinue
+    if (-not $property) { return $false }
+
+    $current = [Environment]::ExpandEnvironmentVariables([string]$property.OpenMeter).Trim()
+    if ($current.Length -ge 2 -and $current[0] -eq '"' -and $current[$current.Length - 1] -eq '"') {
+        $current = $current.Substring(1, $current.Length - 2)
+    }
+    $currentFull = [System.IO.Path]::GetFullPath($current)
+    $expectedFull = [System.IO.Path]::GetFullPath($ExpectedPath)
+    if (-not $currentFull.Equals($expectedFull, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to remove unexpected OpenMeter startup target: $current"
+    }
+
+    Remove-ItemProperty -LiteralPath $RunKey -Name 'OpenMeter'
+    return $true
+}
+
 function Install-OpenMeterPrivateMsix {
     [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'Medium')]
     param(
@@ -337,5 +364,6 @@ Export-ModuleMember -Function @(
     'Assert-OpenMeterPrebuiltSet',
     'Test-OpenMeterPrivatePackage',
     'Assert-OpenMeterMsixTrust',
+    'Remove-OpenMeterLegacyStartup',
     'Install-OpenMeterPrivateMsix'
 )

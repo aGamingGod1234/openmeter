@@ -177,6 +177,7 @@ function Test-InstallValidation {
     $certificate = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($CertificatePath)
     $trustedBefore = Test-Path -LiteralPath "Cert:\LocalMachine\TrustedPeople\$($certificate.Thumbprint)"
     $scratch = Join-Path ([System.IO.Path]::GetTempPath()) ("openmeter-msix-install-test-{0}" -f [guid]::NewGuid().ToString('N'))
+    $testRunKey = "HKCU:\Software\OpenMeterPrivateMsixTests\$([guid]::NewGuid().ToString('N'))"
     try {
         $validated = Test-OpenMeterPrivatePackage `
             -PackagePath $PackagePath `
@@ -224,12 +225,29 @@ function Test-InstallValidation {
         }
         catch { $tamperRejected = $true }
         Assert-True $tamperRejected 'Tampered MSIX was accepted'
+
+        New-Item -Path $testRunKey -Force | Out-Null
+        $legacyPath = 'C:\Users\Example\AppData\Local\OpenMeter\openmeter-tray.exe'
+        Set-ItemProperty -LiteralPath $testRunKey -Name OpenMeter -Value ('"{0}"' -f $legacyPath)
+        $removed = Remove-OpenMeterLegacyStartup -RunKey $testRunKey -ExpectedPath $legacyPath
+        Assert-True $removed 'Exact legacy startup target was not removed'
+        Assert-True ($null -eq (Get-ItemProperty -LiteralPath $testRunKey -Name OpenMeter -ErrorAction SilentlyContinue)) 'Legacy startup property still exists'
+
+        $unexpectedPath = 'C:\Program Files\OpenMeter\openmeter-tray.exe'
+        Set-ItemProperty -LiteralPath $testRunKey -Name OpenMeter -Value $unexpectedPath
+        $unexpectedRejected = $false
+        try { Remove-OpenMeterLegacyStartup -RunKey $testRunKey -ExpectedPath $legacyPath | Out-Null } catch { $unexpectedRejected = $true }
+        Assert-True $unexpectedRejected 'Unexpected startup target was removed'
+        Assert-Equal (Get-ItemPropertyValue -LiteralPath $testRunKey -Name OpenMeter) $unexpectedPath 'Unexpected startup target was mutated'
     }
     finally {
         $trustedAfter = Test-Path -LiteralPath "Cert:\LocalMachine\TrustedPeople\$($certificate.Thumbprint)"
         Assert-Equal $trustedAfter $trustedBefore 'Validation test changed persistent certificate trust'
         if (Test-Path -LiteralPath $scratch) {
             Remove-Item -LiteralPath $scratch -Recurse -Force
+        }
+        if (Test-Path -LiteralPath $testRunKey) {
+            Remove-Item -LiteralPath $testRunKey -Recurse -Force
         }
     }
 }

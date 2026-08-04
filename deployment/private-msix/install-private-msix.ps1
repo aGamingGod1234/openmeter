@@ -22,6 +22,12 @@ if (-not $PackagePath -or -not $CertificatePath -or -not $ExpectedThumbprint) {
 }
 
 Import-Module (Join-Path $PSScriptRoot 'PrivateMsix.psm1') -Force
+$legacyPath = Join-Path $env:LOCALAPPDATA 'OpenMeter\openmeter-tray.exe'
+Remove-OpenMeterLegacyStartup -ExpectedPath $legacyPath | Out-Null
+Get-Process -Name 'openmeter-tray' -ErrorAction SilentlyContinue |
+    Where-Object { $_.Path -and $_.Path.Equals($legacyPath, [StringComparison]::OrdinalIgnoreCase) } |
+    Stop-Process -Force
+
 $trustPath = "Cert:\LocalMachine\TrustedPeople\$($ExpectedThumbprint.ToUpperInvariant())"
 $addedMachineTrust = -not (Test-Path -LiteralPath $trustPath -PathType Leaf)
 $trustHelper = Join-Path $PSScriptRoot 'set-machine-trust.ps1'
