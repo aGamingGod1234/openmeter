@@ -104,5 +104,6 @@ fn local_spend(id: &str, name: &str) -> ProviderSpend {
             }],
             unpriced_models: vec![],
         }],
+        tracking_events: vec![],
     }
 }

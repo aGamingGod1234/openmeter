@@ -232,6 +232,27 @@ pub struct ProviderSpend {
     pub unpriced_models: Vec<String>,
     /// Normalized per-day facts used by encrypted peer history.
     pub daily: Vec<DailySpend>,
+    /// Event-level normalized facts used only to build encrypted tracking
+    /// payloads. The frontend receives projections, never this source list.
+    #[serde(skip_serializing)]
+    pub tracking_events: Vec<RawSpendEvent>,
+}
+
+#[derive(Debug, Serialize, serde::Deserialize, Clone, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct RawSpendEvent {
+    /// Stable source-native identity when the provider log exposes one. It is
+    /// HMACed before sync and never serialized to the frontend.
+    #[serde(default)]
+    pub source_id: Option<String>,
+    pub occurred_at_ms: i64,
+    pub model: String,
+    pub cost: f64,
+    pub input: f64,
+    pub output: f64,
+    pub cached: f64,
+    pub reasoning: f64,
+    pub total_tokens: f64,
 }
 
 impl ProviderSpend {
@@ -250,6 +271,7 @@ type DayMap = HashMap<(i32, String), (f64, f64)>;
 struct FileData {
     days: DayMap,
     unpriced: HashMap<String, u64>,
+    tracking_events: Vec<RawSpendEvent>,
 }
 
 struct FileEntry {
@@ -277,7 +299,7 @@ fn cache() -> &'static Mutex<HashMap<PathBuf, FileEntry>> {
 // stale-price cache is worse than a slow first scan.
 // ---------------------------------------------------------------------------
 
-const PERSIST_VERSION: u32 = 1;
+const PERSIST_VERSION: u32 = 2;
 
 /// Set when any file was (re)parsed this run — nothing changed, nothing saved.
 static CACHE_DIRTY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -300,6 +322,7 @@ struct PersistEntry {
     size: u64,
     days: Vec<(i32, String, f64, f64)>,
     unpriced: Vec<(String, u64)>,
+    tracking_events: Vec<RawSpendEvent>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -335,6 +358,7 @@ fn load_persisted_cache() {
                 data.days.insert((day, model), (cost, tokens));
             }
             data.unpriced = e.unpriced.into_iter().collect();
+            data.tracking_events = e.tracking_events;
             map.insert(e.path, FileEntry { mtime, size: e.size, gen, data });
         }
     });
@@ -372,6 +396,7 @@ fn save_persisted_cache() {
                     .map(|((day, model), (cost, tokens))| (*day, model.clone(), *cost, *tokens))
                     .collect(),
                 unpriced: e.data.unpriced.iter().map(|(m, c)| (m.clone(), *c)).collect(),
+                tracking_events: e.data.tracking_events.clone(),
             }
         })
         .collect();
@@ -398,6 +423,17 @@ fn add_event(data: &mut FileData, ts: DateTime<Utc>, model: &str, cost: f64, tok
         .or_insert((0.0, 0.0));
     entry.0 += cost;
     entry.1 += tokens;
+    data.tracking_events.push(RawSpendEvent {
+        source_id: None,
+        occurred_at_ms: ts.timestamp_millis(),
+        model: model.to_string(),
+        cost,
+        input: 0.0,
+        output: 0.0,
+        cached: 0.0,
+        reasoning: 0.0,
+        total_tokens: tokens,
+    });
 }
 
 /// Tally an event no catalog can price: its tokens still count (they're
@@ -410,6 +446,7 @@ fn note_unpriced(data: &mut FileData, ts: DateTime<Utc>, model: &str, tokens: f6
 }
 
 fn merge_data(target: &mut FileData, source: FileData) {
+    target.tracking_events.extend(source.tracking_events);
     for (key, (cost, tokens)) in source.days {
         let entry = target.days.entry(key).or_insert((0.0, 0.0));
         entry.0 += cost;
@@ -458,6 +495,7 @@ fn build_spend_at(id: &str, name: &str, data: FileData, today: i32) -> ProviderS
     let daily = normalized_days(&data.days, &data.unpriced, today);
     let unpriced = data.unpriced.values().sum();
     let days = data.days;
+    let tracking_events = data.tracking_events;
     let mut sp = ProviderSpend {
         id: id.to_string(),
         name: name.to_string(),
@@ -468,6 +506,7 @@ fn build_spend_at(id: &str, name: &str, data: FileData, today: i32) -> ProviderS
         unpriced,
         unpriced_models,
         daily,
+        tracking_events,
     };
     let mut models: [HashMap<String, (f64, f64)>; 3] =
         [HashMap::new(), HashMap::new(), HashMap::new()];
@@ -1684,6 +1723,7 @@ mod tests {
                 size: 4096,
                 days: vec![(739_000, "claude-fable-5".into(), 1.25, 40_000.0)],
                 unpriced: vec![("mystery-model".into(), 3)],
+                tracking_events: vec![],
             }],
         };
         let json = serde_json::to_string(&doc).unwrap();
@@ -2167,11 +2207,23 @@ fn pi_events_data(events: Vec<AccountUsageEvent>) -> FileData {
             .or_insert((0.0, 0.0));
         totals.0 += cost.unwrap_or_default();
         totals.1 += event.tokens as f64;
+        data.tracking_events.push(RawSpendEvent {
+            source_id: event.event_id,
+            occurred_at_ms: timestamp.timestamp_millis(),
+            model: event.model,
+            cost: cost.unwrap_or_default(),
+            input: event.input,
+            output: event.output,
+            cached: event.cache_read,
+            reasoning: 0.0,
+            total_tokens: event.tokens as f64,
+        });
     }
     data
 }
 
 pub(crate) fn merge_provider_spend(target: &mut ProviderSpend, source: ProviderSpend) {
+    target.tracking_events.extend(source.tracking_events);
     merge_window(&mut target.today, source.today);
     merge_window(&mut target.yesterday, source.yesterday);
     merge_window(&mut target.last30, source.last30);

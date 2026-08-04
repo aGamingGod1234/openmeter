@@ -15,6 +15,7 @@ pub mod spend;
 pub mod sync_client;
 pub mod sync_history;
 mod sync_runtime;
+pub mod tracking_events;
 mod telemetry;
 pub mod updates;
 
