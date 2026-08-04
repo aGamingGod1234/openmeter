@@ -7,6 +7,7 @@ pub const MAX_ENVELOPE_BYTES: usize = 2 * 1024 * 1024;
 pub const MAX_ENVELOPE_WIRE_BYTES: usize = 4 * MAX_ENVELOPE_BYTES.div_ceil(3) + 4 * 1024;
 pub const MAX_PAYLOAD_BYTES: usize = 8 * 1024 * 1024;
 pub const HISTORY_SCHEMA: &str = "openmeter.history.v1";
+pub const TRACKING_SCHEMA: &str = "openmeter.tracking.v2";
 
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
 pub enum ProtocolError {
@@ -47,8 +48,31 @@ impl EnvelopeMeta {
         Ok(meta)
     }
 
+    pub fn tracking_v2(
+        device_id: impl Into<String>,
+        revision: u64,
+        generated_at_ms: i64,
+    ) -> Result<Self, ProtocolError> {
+        let meta = Self {
+            schema: TRACKING_SCHEMA.to_string(),
+            device_id: device_id.into(),
+            revision,
+            generated_at_ms,
+        };
+        meta.validate_tracking()?;
+        Ok(meta)
+    }
+
     pub(crate) fn validate(&self) -> Result<(), ProtocolError> {
-        if self.schema != HISTORY_SCHEMA {
+        self.validate_schema(HISTORY_SCHEMA)
+    }
+
+    pub(crate) fn validate_tracking(&self) -> Result<(), ProtocolError> {
+        self.validate_schema(TRACKING_SCHEMA)
+    }
+
+    fn validate_schema(&self, expected: &str) -> Result<(), ProtocolError> {
+        if self.schema != expected {
             return Err(ProtocolError::Invalid("unsupported schema"));
         }
         validate_id(&self.device_id, 64)?;
@@ -171,7 +195,7 @@ mod base64_bytes {
     }
 }
 
-fn validate_id(value: &str, max: usize) -> Result<(), ProtocolError> {
+pub(crate) fn validate_id(value: &str, max: usize) -> Result<(), ProtocolError> {
     if value.is_empty()
         || value.len() > max
         || !value
@@ -183,14 +207,14 @@ fn validate_id(value: &str, max: usize) -> Result<(), ProtocolError> {
     Ok(())
 }
 
-fn validate_text(value: &str, max: usize) -> Result<(), ProtocolError> {
+pub(crate) fn validate_text(value: &str, max: usize) -> Result<(), ProtocolError> {
     if value.trim().is_empty() || value.len() > max || value.chars().any(char::is_control) {
         return Err(ProtocolError::Invalid("invalid model identifier"));
     }
     Ok(())
 }
 
-fn validate_day(value: &str) -> Result<(), ProtocolError> {
+pub(crate) fn validate_day(value: &str) -> Result<(), ProtocolError> {
     let bytes = value.as_bytes();
     if bytes.len() != 10
         || bytes[4] != b'-'
@@ -205,7 +229,7 @@ fn validate_day(value: &str) -> Result<(), ProtocolError> {
     Ok(())
 }
 
-fn validate_total(value: f64) -> Result<(), ProtocolError> {
+pub(crate) fn validate_total(value: f64) -> Result<(), ProtocolError> {
     if !value.is_finite() || value < 0.0 {
         return Err(ProtocolError::Invalid("invalid usage total"));
     }
