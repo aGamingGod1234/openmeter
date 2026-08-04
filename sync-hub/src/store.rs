@@ -4,7 +4,7 @@ use std::sync::Mutex;
 use openmeter_sync_protocol::{
     EncryptedEnvelope, HISTORY_SCHEMA, MAX_ENVELOPE_BYTES, MAX_ENVELOPE_WIRE_BYTES, TRACKING_SCHEMA,
 };
-use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
+use rusqlite::{params, Connection, OpenFlags, OptionalExtension, TransactionBehavior};
 use serde::Serialize;
 use thiserror::Error;
 
@@ -62,6 +62,19 @@ enum EnvelopeTable {
 }
 
 impl Store {
+    pub fn check_read_only(path: impl AsRef<Path>) -> Result<(), HubError> {
+        let connection = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .map_err(|_| HubError::Database)?;
+        let result: String = connection
+            .query_row("PRAGMA integrity_check", [], |row| row.get(0))
+            .map_err(|_| HubError::Database)?;
+        if result == "ok" {
+            Ok(())
+        } else {
+            Err(HubError::Database)
+        }
+    }
+
     pub fn open(path: impl AsRef<Path>) -> Result<Self, HubError> {
         let connection = Connection::open(path).map_err(|_| HubError::Database)?;
         connection

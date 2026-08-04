@@ -16,6 +16,11 @@ $sentinel = Join-Path $dataRoot 'smoke-preserve.txt'
 $createdSentinel = -not (Test-Path -LiteralPath $sentinel)
 
 New-Item -ItemType Directory -Path $dataRoot -Force | Out-Null
+foreach ($path in @($installRoot, $dataRoot)) {
+    if ([IO.Path]::GetFullPath($path) -match '(?i)(^|\\)OneDrive(\\|$)') {
+        throw "OpenMeter path must remain outside OneDrive: $path"
+    }
+}
 if ($createdSentinel) { Set-Content -LiteralPath $sentinel -Value 'preserve-user-data' -Encoding Ascii }
 
 function Install-OpenMeter {

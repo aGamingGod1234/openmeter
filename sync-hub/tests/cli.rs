@@ -1,5 +1,6 @@
 use std::fs;
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 #[test]
 fn serve_rejects_wildcard_bind_before_opening_storage() {
@@ -52,13 +53,43 @@ fn enrollment_cli_creates_a_single_use_token_for_the_exact_tailnet_database() {
     let _ = fs::remove_dir_all(root);
 }
 
+#[test]
+fn database_check_opens_an_existing_backup_read_only() {
+    let root = temp_root();
+    fs::create_dir_all(&root).unwrap();
+    let database = root.join("hub.db");
+    openmeter_sync_hub::Store::open(&database).unwrap();
+    let before = fs::metadata(&database).unwrap().len();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_openmeter-sync-hub"))
+        .args([
+            "database",
+            "check",
+            "--database",
+            database.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("read-only mode"));
+    assert_eq!(fs::metadata(&database).unwrap().len(), before);
+    let _ = fs::remove_dir_all(root);
+}
+
 fn temp_root() -> std::path::PathBuf {
+    static NEXT_ROOT: AtomicU64 = AtomicU64::new(0);
     std::env::temp_dir().join(format!(
-        "openmeter-sync-cli-{}-{}",
+        "openmeter-sync-cli-{}-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
-            .as_nanos()
+            .as_nanos(),
+        NEXT_ROOT.fetch_add(1, Ordering::Relaxed)
     ))
 }

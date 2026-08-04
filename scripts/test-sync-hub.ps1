@@ -9,11 +9,14 @@ param(
 $ErrorActionPreference = 'Stop'
 $installerPath = Join-Path $PSScriptRoot 'install-sync-hub.ps1'
 $uninstallerPath = Join-Path $PSScriptRoot 'uninstall-sync-hub.ps1'
+$crossDevicePath = Join-Path $PSScriptRoot 'test-cross-device-sync.ps1'
 if (-not (Test-Path -LiteralPath $installerPath)) { throw 'Sync hub installer is missing' }
 if (-not (Test-Path -LiteralPath $uninstallerPath)) { throw 'Sync hub uninstaller is missing' }
+if (-not (Test-Path -LiteralPath $crossDevicePath)) { throw 'Cross-device acceptance script is missing' }
 
 $installer = Get-Content -LiteralPath $installerPath -Raw
 $liveTest = Get-Content -LiteralPath $PSCommandPath -Raw
+$crossDeviceTest = Get-Content -LiteralPath $crossDevicePath -Raw
 if ($installer -notmatch '100\.90\.87\.7:6740') { throw 'Hub must bind its exact Tailscale address' }
 if ($installer -match '0\.0\.0\.0|AnyAddress|OneDrive') { throw 'Unsafe hub binding or storage path' }
 if ($installer -notmatch 'OpenMeterSyncHub') { throw 'Stable service identity missing' }
@@ -25,6 +28,23 @@ if ($installer -match 'RandomNumberGenerator\]::Fill' -or $liveTest -match 'Rand
 }
 if ($installer -notmatch '\[wmiclass\]''Win32_Service''' -or $installer -notmatch '\$serviceClass\.Create') {
     throw 'Service creation must preserve the quoted command through the Windows service API'
+}
+foreach ($required in @(
+    'openmeter-sync-hub.previous.exe',
+    'backups',
+    'Get-FileHash',
+    'BackupHash',
+    'database check',
+    'pepper.bin'
+)) {
+    if ($installer -notmatch [regex]::Escape($required)) {
+        throw "Recoverable hub upgrade invariant is missing: $required"
+    }
+}
+foreach ($required in @('/v1/envelopes', '/v2/envelopes', '/v2/devices/', 'Restart-Service', 'device revoke')) {
+    if ($crossDeviceTest -notmatch [regex]::Escape($required)) {
+        throw "Cross-device acceptance invariant is missing: $required"
+    }
 }
 
 if ($StaticOnly) { exit 0 }

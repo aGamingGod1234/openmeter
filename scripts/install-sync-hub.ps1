@@ -8,8 +8,10 @@ $ServiceName = 'OpenMeterSyncHub'
 $InstallDirectory = 'C:\Program Files\OpenMeter Sync Hub'
 $DataDirectory = 'C:\ProgramData\OpenMeterSync'
 $InstalledBinary = Join-Path $InstallDirectory 'openmeter-sync-hub.exe'
+$PreviousBinary = Join-Path $InstallDirectory 'openmeter-sync-hub.previous.exe'
 $DatabasePath = Join-Path $DataDirectory 'hub.db'
 $PepperPath = Join-Path $DataDirectory 'pepper.bin'
+$BackupDirectory = Join-Path $DataDirectory 'backups'
 $FirewallRule = 'OpenMeter Sync Hub (Tailscale)'
 $BindAddress = '100.90.87.7:6740'
 
@@ -21,6 +23,33 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
 
 $source = (Resolve-Path -LiteralPath $BinaryPath).Path
 New-Item -ItemType Directory -Force -Path $InstallDirectory, $DataDirectory | Out-Null
+
+$existingController = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+if ($existingController -and $existingController.Status -ne 'Stopped') {
+    Stop-Service -Name $ServiceName -Force
+    $existingController.WaitForStatus('Stopped', [TimeSpan]::FromSeconds(30))
+}
+
+$BackupPath = $null
+$BackupHash = $null
+if (Test-Path -LiteralPath $DatabasePath -PathType Leaf) {
+    New-Item -ItemType Directory -Force -Path $BackupDirectory | Out-Null
+    $timestamp = [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssfffZ')
+    $BackupPath = Join-Path $BackupDirectory "hub-$timestamp.db"
+    Copy-Item -LiteralPath $DatabasePath -Destination $BackupPath
+    $sourceHash = (Get-FileHash -LiteralPath $DatabasePath -Algorithm SHA256).Hash
+    $BackupHash = (Get-FileHash -LiteralPath $BackupPath -Algorithm SHA256).Hash
+    if ($sourceHash -ne $BackupHash) { throw 'Hub database backup hash does not match the stopped database.' }
+    & $source database check --database $BackupPath | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Hub database backup failed its read-only integrity check.' }
+}
+
+$pepperHash = if (Test-Path -LiteralPath $PepperPath -PathType Leaf) {
+    (Get-FileHash -LiteralPath $PepperPath -Algorithm SHA256).Hash
+} else { $null }
+if (Test-Path -LiteralPath $InstalledBinary -PathType Leaf) {
+    Copy-Item -LiteralPath $InstalledBinary -Destination $PreviousBinary -Force
+}
 Copy-Item -LiteralPath $source -Destination $InstalledBinary -Force
 
 if (-not (Test-Path -LiteralPath $PepperPath)) {
@@ -42,12 +71,9 @@ if ($LASTEXITCODE -ne 0) { throw 'Could not secure the sync data directory.' }
     'NT AUTHORITY\SYSTEM:F' | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'Could not secure the server pepper.' }
 
-$existingController = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
-if ($existingController) {
-    if ($existingController.Status -ne 'Stopped') {
-        Stop-Service -Name $ServiceName -Force
-        $existingController.WaitForStatus('Stopped', [TimeSpan]::FromSeconds(30))
-    }
+if ($pepperHash) {
+    $preservedPepperHash = (Get-FileHash -LiteralPath $PepperPath -Algorithm SHA256).Hash
+    if ($pepperHash -ne $preservedPepperHash) { throw 'Existing pepper.bin changed during upgrade.' }
 }
 
 $serviceCommand = "`"$InstalledBinary`" service run --bind $BindAddress --database $DatabasePath --pepper-file $PepperPath"
@@ -86,3 +112,7 @@ Start-Service -Name $ServiceName
 (Get-Service -Name $ServiceName).WaitForStatus('Running', [TimeSpan]::FromSeconds(30))
 Invoke-RestMethod -Uri 'http://100.90.87.7:6740/health' -TimeoutSec 15 | Out-Null
 Write-Host 'OpenMeter Sync Hub is running at http://100.90.87.7:6740.'
+if ($BackupPath) { Write-Host "Database backup: $BackupPath (SHA-256 $BackupHash)" }
+if (Test-Path -LiteralPath $PreviousBinary) {
+    Write-Host "Rollback binary retained at $PreviousBinary. Rollback never deletes hub data."
+}

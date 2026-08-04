@@ -32,13 +32,22 @@ async fn run() -> Result<(), Box<dyn Error>> {
         [group, command, rest @ ..] if group == "device" && command == "revoke" => {
             revoke_device(parse_options(rest)?)
         }
+        [group, command, rest @ ..] if group == "database" && command == "check" => {
+            check_database(parse_options(rest)?)
+        }
         [group, command, rest @ ..] if group == "service" && command == "run" => {
             run_service(parse_options(rest)?)
         }
         _ => Err(cli_error(
-            "usage: openmeter-sync-hub <serve|service run|enrollment create|device list|device revoke> [options]",
+            "usage: openmeter-sync-hub <serve|service run|enrollment create|device list|device revoke|database check> [options]",
         )),
     }
+}
+
+fn check_database(options: BTreeMap<String, String>) -> Result<(), Box<dyn Error>> {
+    Store::check_read_only(required(&options, "--database")?)?;
+    println!("database integrity check passed in read-only mode");
+    Ok(())
 }
 
 fn run_service(options: BTreeMap<String, String>) -> Result<(), Box<dyn Error>> {

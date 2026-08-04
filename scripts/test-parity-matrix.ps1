@@ -15,4 +15,14 @@ foreach ($id in $required) {
     if ($row -notmatch '\|\s*Complete\s*\|\s*$') { throw "Parity row is not complete: $id" }
     if ($row -notmatch '`[^`]+`') { throw "Parity row has no concrete implementation/test reference: $id" }
 }
+$trackingRow = ($text -split "`r?`n") | Where-Object { $_ -match '\|\s*cross-device-tracking\s*\|' } | Select-Object -First 1
+if (-not $trackingRow) { throw 'Missing parity row: cross-device-tracking' }
+if ($trackingRow -notmatch '\|\s*(Pending live|Complete)\s*\|\s*$') {
+    throw 'Cross-device tracking must remain pending until live acceptance or be complete.'
+}
+foreach ($evidence in @('Laptop', 'Desktop', '7/30-day', 'test-cross-device-sync.ps1', 'Pending live three-machine acceptance')) {
+    if ($text -notmatch [regex]::Escape($evidence)) {
+        throw "Cross-device parity evidence is missing: $evidence"
+    }
+}
 Write-Host 'OpenUsage parity matrix is complete.'
