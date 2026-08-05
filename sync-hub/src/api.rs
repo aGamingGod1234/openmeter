@@ -57,6 +57,7 @@ impl Hub {
 pub fn router(hub: Hub) -> Router {
     Router::new()
         .route("/health", get(health))
+        .route("/v1/revisions", get(revisions))
         .route("/v1/enroll", post(enroll))
         .route("/v1/envelopes", get(list_envelopes))
         .route("/v1/devices/{device_id}/envelope", put(put_envelope))
@@ -76,6 +77,21 @@ pub fn router(hub: Hub) -> Router {
 
 async fn health() -> StatusCode {
     StatusCode::NO_CONTENT
+}
+
+#[derive(Serialize)]
+struct RevisionResponse {
+    history: Option<u64>,
+    tracking: Option<u64>,
+}
+
+async fn revisions(
+    State(hub): State<Hub>,
+    headers: HeaderMap,
+) -> Result<Json<RevisionResponse>, ApiError> {
+    let device_id = authenticate(&hub, &headers, None)?;
+    let (history, tracking) = hub.store.revisions(&device_id)?;
+    Ok(Json(RevisionResponse { history, tracking }))
 }
 
 #[derive(Deserialize)]

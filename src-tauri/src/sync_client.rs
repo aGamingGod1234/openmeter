@@ -20,7 +20,7 @@ impl PendingEnvelope {
         if self
             .0
             .as_ref()
-            .is_none_or(|current| envelope.meta.revision > current.meta.revision)
+            .is_none_or(|current| envelope.meta.revision >= current.meta.revision)
         {
             self.0 = Some(envelope);
         }
@@ -87,6 +87,12 @@ pub struct Enrollment {
     pub credential: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct RemoteRevisions {
+    pub history: Option<u64>,
+    pub tracking: Option<u64>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TrackingEnvelopeRecord {
@@ -146,6 +152,20 @@ impl SyncClient {
             .await
             .map_err(|_| SyncError::Network)?;
         response
+            .error_for_status()
+            .map_err(map_status)?
+            .json()
+            .await
+            .map_err(|_| SyncError::InvalidResponse)
+    }
+
+    pub async fn revisions(&self, credential: &str) -> Result<RemoteRevisions, SyncError> {
+        self.http
+            .get(self.endpoint("v1/revisions")?)
+            .header(AUTHORIZATION, format!("Bearer {credential}"))
+            .send()
+            .await
+            .map_err(|_| SyncError::Network)?
             .error_for_status()
             .map_err(map_status)?
             .json()

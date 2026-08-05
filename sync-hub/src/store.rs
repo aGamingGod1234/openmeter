@@ -62,6 +62,21 @@ enum EnvelopeTable {
 }
 
 impl Store {
+    pub fn revisions(&self, device_id: &str) -> Result<(Option<u64>, Option<u64>), HubError> {
+        let connection = self.connection.lock().map_err(|_| HubError::Database)?;
+        let read = |table: &str| -> Result<Option<u64>, HubError> {
+            connection
+                .query_row(
+                    &format!("SELECT revision FROM {table} WHERE device_id = ?1"),
+                    [device_id],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(|_| HubError::Database)
+        };
+        Ok((read("envelopes")?, read("tracking_envelopes")?))
+    }
+
     pub fn check_read_only(path: impl AsRef<Path>) -> Result<(), HubError> {
         let connection = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
             .map_err(|_| HubError::Database)?;

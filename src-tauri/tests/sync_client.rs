@@ -25,6 +25,17 @@ fn stale_pending_snapshot_cannot_replace_a_newer_revision() {
     assert_eq!(queue.current().unwrap().meta.revision, 5);
 }
 
+#[test]
+fn reconciled_snapshot_replaces_stale_content_at_the_same_revision() {
+    let mut queue = PendingEnvelope::default();
+    let mut stale = envelope(5);
+    stale.ciphertext = vec![1; 32];
+    queue.replace(stale);
+    queue.replace(envelope(5));
+
+    assert_eq!(queue.current().unwrap().ciphertext, vec![9; 32]);
+}
+
 fn envelope(revision: u64) -> EncryptedEnvelope {
     EncryptedEnvelope {
         meta: EnvelopeMeta::new("device-test", revision, 1_800_000_000_000).unwrap(),

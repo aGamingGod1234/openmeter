@@ -7,7 +7,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use openmeter_sync_protocol::{
     derive_tracking_key, open, seal, seal_tracking, DeviceDescriptorV2, EnvelopeMeta, HistoryKey,
-    HistoryPayloadV1, TrackingPayloadV2,
+    HistoryPayloadV1, ProtocolError, TrackingPayloadV2,
 };
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -176,7 +176,9 @@ pub fn spawn_scheduler() {
                 .and_then(Value::as_bool)
                 .unwrap_or(false)
             {
-                let _ = sync_now().await;
+                if let Err(error) = sync_now().await {
+                    crate::note_config_error(&format!("sync scheduler: {error}"));
+                }
             }
             tokio::time::sleep(SYNC_INTERVAL).await;
         }
@@ -217,20 +219,30 @@ async fn sync_once() -> Result<SyncStatus, String> {
     let device_id = config_string(&cfg, "syncDeviceId")
         .filter(|value| !value.is_empty())
         .ok_or_else(|| "sync device is not enrolled".to_string())?;
-    let history_revision = cfg
+    let local_history_revision = cfg
         .get("syncRevision")
         .and_then(Value::as_u64)
-        .unwrap_or(0)
-        .saturating_add(1);
-    let tracking_revision = cfg
+        .unwrap_or(0);
+    let local_tracking_revision = cfg
         .get("syncTrackingRevision")
         .and_then(Value::as_u64)
-        .unwrap_or(0)
-        .saturating_add(1);
+        .unwrap_or(0);
     let device_label = config_string(&cfg, "syncDeviceLabel")
         .filter(|label| !label.trim().is_empty())
         .unwrap_or_else(default_device_label);
     let credential = device_credential()?;
+    let client = client()?;
+    let remote_revisions = client.revisions(credential.expose_str()?).await;
+    let history_revision = reconciled_next_revision(
+        local_history_revision,
+        remote_revisions.is_ok(),
+        remote_revisions.as_ref().ok().and_then(|state| state.history),
+    );
+    let tracking_revision = reconciled_next_revision(
+        local_tracking_revision,
+        remote_revisions.is_ok(),
+        remote_revisions.as_ref().ok().and_then(|state| state.tracking),
+    );
     let mut key_bytes = history_key()?;
     let key = HistoryKey::from_bytes(key_bytes);
     let tracking_key = derive_tracking_key(&key_bytes).map_err(|error| error.to_string())?;
@@ -251,7 +263,6 @@ async fn sync_once() -> Result<SyncStatus, String> {
     let meta = EnvelopeMeta::new(&device_id, history_revision, now_ms)
         .map_err(|error| error.to_string())?;
     let envelope = seal(&key, meta, &payload).map_err(|error| error.to_string())?;
-    let client = client()?;
     let history_result = publish_history(
         &client,
         &device_id,
@@ -280,7 +291,7 @@ async fn sync_once() -> Result<SyncStatus, String> {
     let retained_from_day = (chrono::Utc::now().date_naive() - chrono::Duration::days(89))
         .format("%Y-%m-%d")
         .to_string();
-    let local_tracking = TrackingPayloadV2 {
+    let mut local_tracking = TrackingPayloadV2 {
         device: DeviceDescriptorV2::new(
             &device_id,
             &device_label,
@@ -295,8 +306,12 @@ async fn sync_once() -> Result<SyncStatus, String> {
     };
     let tracking_meta = EnvelopeMeta::tracking_v2(&device_id, tracking_revision, now_ms)
         .map_err(|error| error.to_string())?;
-    let tracking_envelope = seal_tracking(&tracking_key, tracking_meta, &local_tracking)
-        .map_err(|error| error.to_string())?;
+    let tracking_envelope = seal_tracking_with_retention(
+        &tracking_key,
+        tracking_meta,
+        &mut local_tracking,
+        now_ms,
+    )?;
     let local_path = tracking_local_path();
     let mut local_cache = PeerEnvelopeCache::load(&local_path).unwrap_or_default();
     local_cache
@@ -368,6 +383,7 @@ async fn publish_history(
     if pending.current().is_some_and(|current| {
         current.meta.schema != openmeter_sync_protocol::HISTORY_SCHEMA
             || current.meta.device_id != device_id
+            || current.meta.revision != envelope.meta.revision
     }) {
         pending.clear();
     }
@@ -412,6 +428,7 @@ async fn publish_tracking(
     if pending.current().is_some_and(|current| {
         current.meta.schema != openmeter_sync_protocol::TRACKING_SCHEMA
             || current.meta.device_id != device_id
+            || current.meta.revision != envelope.meta.revision
     }) {
         pending.clear();
     }
@@ -551,6 +568,53 @@ fn config_string(config: &Value, key: &str) -> Option<String> {
     config.get(key).and_then(Value::as_str).map(str::to_string)
 }
 
+fn reconciled_next_revision(
+    local_revision: u64,
+    remote_was_read: bool,
+    remote_revision: Option<u64>,
+) -> u64 {
+    if remote_was_read {
+        remote_revision.unwrap_or(0).saturating_add(1)
+    } else {
+        local_revision.saturating_add(1)
+    }
+}
+
+fn seal_tracking_with_retention(
+    key: &openmeter_sync_protocol::TrackingKey,
+    meta: EnvelopeMeta,
+    payload: &mut TrackingPayloadV2,
+    now_ms: i64,
+) -> Result<openmeter_sync_protocol::EncryptedEnvelope, String> {
+    loop {
+        match seal_tracking(key, meta.clone(), payload) {
+            Ok(envelope) => return Ok(envelope),
+            Err(ProtocolError::TooLarge) if payload.events.len() > 1 => {
+                let remove = (payload.events.len() / 8).max(1);
+                payload.events.drain(..remove);
+                payload.retained_from_day = payload
+                    .events
+                    .first()
+                    .and_then(|event| chrono::DateTime::from_timestamp_millis(event.occurred_at_ms))
+                    .map(|time| time.format("%Y-%m-%d").to_string())
+                    .unwrap_or_else(|| {
+                        chrono::DateTime::from_timestamp_millis(now_ms)
+                            .map(|time| time.format("%Y-%m-%d").to_string())
+                            .unwrap_or_else(|| "1970-01-01".to_string())
+                    });
+            }
+            Err(ProtocolError::TooLarge) if !payload.tombstones.is_empty() => {
+                payload
+                    .tombstones
+                    .sort_by_key(|tombstone| tombstone.removed_at_ms);
+                let remove = (payload.tombstones.len() / 8).max(1);
+                payload.tombstones.drain(..remove);
+            }
+            Err(error) => return Err(error.to_string()),
+        }
+    }
+}
+
 fn device_credential() -> Result<SecretText, String> {
     CredentialStore::read(DEVICE_CREDENTIAL_TARGET)
         .map_err(|error| error.to_string())?
@@ -634,4 +698,24 @@ fn dashboard() -> &'static Mutex<Option<TrackingDashboard>> {
 fn peers() -> &'static Mutex<Vec<HistoryPayloadV1>> {
     static PEERS: OnceLock<Mutex<Vec<HistoryPayloadV1>>> = OnceLock::new();
     PEERS.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::reconciled_next_revision;
+
+    #[test]
+    fn revision_recovery_uses_the_hub_after_a_local_rollback() {
+        assert_eq!(reconciled_next_revision(128, true, Some(135)), 136);
+    }
+
+    #[test]
+    fn revision_recovery_starts_at_one_after_a_hub_reset() {
+        assert_eq!(reconciled_next_revision(128, true, None), 1);
+    }
+
+    #[test]
+    fn revision_recovery_falls_back_to_local_state_when_pull_is_unavailable() {
+        assert_eq!(reconciled_next_revision(128, false, None), 129);
+    }
 }

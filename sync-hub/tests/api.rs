@@ -47,6 +47,10 @@ async fn enrollment_is_single_use_and_upload_requires_device_bearer() {
     .await;
     assert_eq!(uploaded.0, StatusCode::NO_CONTENT);
 
+    let revisions = send_json(&app, "/v1/revisions", Some(credential), Value::Null).await;
+    assert_eq!(revisions.0, StatusCode::OK);
+    assert_eq!(revisions.1, json!({"history": 1, "tracking": null}));
+
     cleanup(db_path);
 }
 
@@ -106,7 +110,9 @@ async fn send_json(
     value: Value,
 ) -> (StatusCode, Value) {
     let mut request = Request::builder()
-        .method(if uri.contains("/envelope") {
+        .method(if uri == "/v1/revisions" {
+            "GET"
+        } else if uri.contains("/envelope") {
             "PUT"
         } else {
             "POST"
