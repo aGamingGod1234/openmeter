@@ -13,6 +13,10 @@ export interface Layout {
   providers: Record<string, ProviderLayout>;
 }
 
+export function resetDashboardViewport(viewport: { scrollTop: number }): void {
+  viewport.scrollTop = 0;
+}
+
 export function snapshotCardId(snapshot: Snapshot): string {
   return snapshot.card_id?.trim() || snapshot.id;
 }

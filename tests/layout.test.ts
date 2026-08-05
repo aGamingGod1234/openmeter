@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { migrateLayout, snapshotCardId } from "../src/layout";
+import { migrateLayout, resetDashboardViewport, snapshotCardId } from "../src/layout";
 
 const metric = {
   label: "Session",
@@ -41,5 +41,15 @@ describe("account-aware layout migration", () => {
     expect(layout.providerOrder).toEqual(["claude", "claude--work"]);
     expect(Object.keys(layout.providers)).toEqual(["claude", "claude--work"]);
     expect(layout.providers.claude).not.toBe(layout.providers["claude--work"]);
+  });
+});
+
+describe("dashboard entry state", () => {
+  it("returns the complete dashboard to its first card on explicit open", () => {
+    const viewport = { scrollTop: 640 };
+
+    resetDashboardViewport(viewport);
+
+    expect(viewport.scrollTop).toBe(0);
   });
 });

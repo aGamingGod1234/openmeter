@@ -5,7 +5,7 @@ import { getVersion } from "@tauri-apps/api/app";
 import type { Metric, Snapshot, UpdateChannel } from "./models";
 import { snapshotProviderId } from "./models";
 import type { Layout, ProviderLayout } from "./layout";
-import { migrateLayout, snapshotCardId } from "./layout";
+import { migrateLayout, resetDashboardViewport, snapshotCardId } from "./layout";
 import {
   accountLabel,
   createNamedAccount,
@@ -3415,7 +3415,7 @@ window.addEventListener("DOMContentLoaded", () => {
       renderAll();
       populatePinnedOptions();
     }
-    providersEl.scrollTop = 0;
+    resetDashboardViewport(providersEl);
     updateTrailActive();
     if (lastSnapshots.length && !customizeOpen) playReveal();
     void refreshTrackingOnly();
