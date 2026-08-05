@@ -29,6 +29,11 @@ import {
   renderSettingsNav,
 } from "./settings-navigation";
 import {
+  nextSidebarPinnedState,
+  shouldCloseSidebarOnPointer,
+  sidebarAriaExpanded,
+} from "./sidebar-affordance";
+import {
   buildTrackingSeries,
   filterTracking,
   quotaDisagreementCopy,
@@ -347,6 +352,7 @@ let trackingGroup: TrackingGroup = "device";
 let spendLoaded = false;
 let spendTab: SpendTab = "today";
 let customizeOpen = false;
+let sidebarPinned = false;
 let revealTimer = 0;
 let animateExpandId: string | null = null;
 
@@ -1986,9 +1992,22 @@ function renderDrawerBody(): void {
 /// Customize lives in a drawer that slides in from the left edge.
 function setDrawer(open: boolean): void {
   customizeOpen = open;
+  if (open) setSidebarPinned(false);
   if (open) renderDrawerBody();
   document.body.classList.toggle("drawer-open", open);
   document.querySelector("#customize-btn")?.classList.toggle("active", open);
+}
+
+function setSidebarPinned(pinned: boolean): void {
+  sidebarPinned = pinned;
+  document.body.classList.toggle("sidebar-pinned", pinned);
+  const handle = document.querySelector<HTMLButtonElement>("#sidebar-handle");
+  if (!handle) return;
+  const expanded = sidebarAriaExpanded(pinned);
+  handle.setAttribute("aria-expanded", expanded);
+  const label = pinned ? "Close navigation menu" : "Open navigation menu";
+  handle.setAttribute("aria-label", label);
+  handle.title = label;
 }
 
 // ---------------------------------------------------------------------------
@@ -3142,6 +3161,7 @@ window.addEventListener("DOMContentLoaded", () => {
     }
     // Esc backs out of Customize/Settings (Mac parity).
     if (e.key === "Escape") {
+      setSidebarPinned(false);
       setDrawer(false);
       setSettings(false);
     }
@@ -3151,6 +3171,19 @@ window.addEventListener("DOMContentLoaded", () => {
       void refresh(true);
     }
   });
+  const sideZone = document.querySelector<HTMLElement>("#side-zone")!;
+  const sidebarHandle = document.querySelector<HTMLButtonElement>("#sidebar-handle")!;
+  sidebarHandle.addEventListener("click", (event) => {
+    event.stopPropagation();
+    setSidebarPinned(nextSidebarPinnedState(sidebarPinned));
+  });
+  document.addEventListener("pointerdown", (event) => {
+    const target = event.target as Node | null;
+    if (shouldCloseSidebarOnPointer(sidebarPinned, target ? sideZone.contains(target) : false)) {
+      setSidebarPinned(false);
+    }
+  });
+  setSidebarPinned(false);
   void getVersion().then((v) => {
     appVersion = v;
     buildText = `v${v} · build ${__BUILD_STAMP__}`;
@@ -3169,6 +3202,7 @@ window.addEventListener("DOMContentLoaded", () => {
   const setSettings = (open: boolean) => {
     const alreadyOpen = document.body.classList.contains("settings-open");
     if (alreadyOpen === open) return;
+    if (open) setSidebarPinned(false);
     document.body.classList.toggle("settings-open", open);
     document.querySelector("#settings-btn")?.classList.toggle("active", open);
     resizeWindowForSettings(open);

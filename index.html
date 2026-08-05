@@ -82,10 +82,22 @@
         </footer>
       </div>
 
-      <!-- Auto-hiding sidebar: the invisible left-edge zone reveals it
-           without leaving a decorative line over the cards. -->
+      <!-- The visible Menu handle makes the auto-hiding sidebar discoverable.
+           The rail is deliberately narrow so it never obscures the cards. -->
       <div id="side-zone">
-        <aside class="sidebar">
+        <button
+          id="sidebar-handle"
+          class="sidebar-handle"
+          type="button"
+          aria-controls="app-sidebar"
+          aria-expanded="false"
+          aria-label="Open navigation menu"
+          title="Open navigation menu"
+        >
+          <span class="sidebar-handle-glyph" aria-hidden="true">&#9776;</span>
+          <span class="sidebar-handle-label" aria-hidden="true">Menu</span>
+        </button>
+        <aside id="app-sidebar" class="sidebar" aria-label="OpenMeter navigation">
           <span id="app-logo" class="app-logo" title="OpenMeter"></span>
           <nav id="trail" aria-label="Card navigation"></nav>
           <div class="sidebar-buttons">

@@ -100,16 +100,79 @@ body {
 }
 
 /* ---------------------------------------------------------------- sidebar */
-/* Auto-hiding: the invisible edge zone reveals the sidebar without leaving
-   a decorative line over the dashboard. */
+/* Auto-hiding, with a visible discovery rail so the navigation is never a
+   hidden hot corner. The rail is intentionally narrower than the cards. */
 
 #side-zone {
   position: fixed;
   left: 0;
   top: 0;
   bottom: 0;
-  width: 10px;
+  width: 24px;
   z-index: 30;
+}
+
+.sidebar-handle {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  z-index: 2;
+  display: flex;
+  width: 24px;
+  height: 84px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 3px;
+  border: 1px solid var(--border);
+  border-left: 0;
+  border-radius: 0 12px 12px 0;
+  background: color-mix(in srgb, var(--card) 92%, transparent);
+  color: var(--muted-foreground);
+  box-shadow: 4px 8px 20px rgb(0 0 0 / 0.18);
+  cursor: pointer;
+  transform: translateY(-50%);
+  transition: width 0.18s ease, background 0.18s ease, color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.sidebar-handle:hover,
+.sidebar-handle:focus-visible,
+body.sidebar-pinned .sidebar-handle {
+  width: 30px;
+  background: color-mix(in srgb, var(--chart-blue) 14%, var(--card));
+  color: var(--foreground);
+  box-shadow: 6px 8px 24px rgb(0 0 0 / 0.28);
+}
+
+.sidebar-handle:focus-visible {
+  outline: 2px solid var(--chart-blue);
+  outline-offset: 2px;
+}
+
+.sidebar-handle-glyph {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.sidebar-handle-label {
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+  writing-mode: vertical-rl;
+}
+
+:root[data-theme="light"] .sidebar-handle {
+  background: color-mix(in srgb, var(--card) 94%, transparent);
+  box-shadow: 4px 8px 20px rgb(0 0 0 / 0.1);
+}
+
+:root[data-theme="light"] body.sidebar-pinned .sidebar-handle {
+  background: color-mix(in srgb, var(--chart-blue) 12%, var(--card));
+  box-shadow: 6px 8px 24px rgb(0 0 0 / 0.16);
 }
 
 /* Liquid glass, same recipe as jazii.dev's floating dock. */
@@ -145,7 +208,8 @@ body {
 }
 
 #side-zone:hover .sidebar,
-.sidebar:focus-within {
+.sidebar:focus-within,
+body.sidebar-pinned .sidebar {
   transform: none;
   box-shadow:
     8px 0 32px -8px rgba(0, 0, 0, 0.4),
@@ -156,7 +220,8 @@ body {
 }
 
 :root[data-theme="light"] #side-zone:hover .sidebar,
-:root[data-theme="light"] .sidebar:focus-within {
+:root[data-theme="light"] .sidebar:focus-within,
+:root[data-theme="light"] body.sidebar-pinned .sidebar {
   box-shadow:
     8px 0 32px -8px rgba(0, 0, 0, 0.12),
     inset 0 1px 1.5px rgba(255, 255, 255, 0.6),
@@ -169,6 +234,9 @@ body {
   display: flex;
   flex-direction: column;
   position: relative;
+  /* Reserve the discoverability rail so it never sits on top of dashboard
+     content, even while the sidebar is tucked away. */
+  padding-left: 24px;
 }
 
 .sidebar-buttons {
@@ -1371,7 +1439,8 @@ body.drawer-open #drawer {
 }
 
 :root[data-theme="light"] #side-zone:hover .sidebar,
-:root[data-theme="light"] .sidebar:focus-within {
+:root[data-theme="light"] .sidebar:focus-within,
+:root[data-theme="light"] body.sidebar-pinned .sidebar {
   box-shadow: 6px 0 24px rgba(0, 0, 0, 0.12);
 }
 
