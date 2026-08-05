@@ -961,6 +961,15 @@ enum PopoverTrigger {
     AutomaticActivation,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PopoverDismissal {
+    HideAndKeepProcess,
+}
+
+fn popover_dismissal() -> PopoverDismissal {
+    PopoverDismissal::HideAndKeepProcess
+}
+
 fn should_show_popover(trigger: PopoverTrigger, frontend_ready: bool) -> bool {
     frontend_ready
         && matches!(
@@ -990,7 +999,8 @@ fn now_ms() -> u64 {
 #[cfg(test)]
 mod window_lifecycle_tests {
     use super::{
-        is_explicit_open, should_hide_unrequested_window, should_show_popover, PopoverTrigger,
+        is_explicit_open, popover_dismissal, should_hide_unrequested_window,
+        should_show_popover, PopoverDismissal, PopoverTrigger,
     };
 
     #[test]
@@ -1020,6 +1030,11 @@ mod window_lifecycle_tests {
         assert!(is_explicit_open(PopoverTrigger::TrayClick));
         assert!(is_explicit_open(PopoverTrigger::GlobalShortcut));
         assert!(!is_explicit_open(PopoverTrigger::AutomaticActivation));
+    }
+
+    #[test]
+    fn dismissing_popover_keeps_tray_process_alive() {
+        assert_eq!(popover_dismissal(), PopoverDismissal::HideAndKeepProcess);
     }
 }
 
@@ -1066,6 +1081,22 @@ fn show_popover(app: &tauri::AppHandle, click: tauri::PhysicalPosition<f64>) {
     let _ = window.emit("popover-shown", ());
 }
 
+fn dismiss_popover(app: &tauri::AppHandle) {
+    match popover_dismissal() {
+        PopoverDismissal::HideAndKeepProcess => {
+            USER_OPEN_AUTHORIZED.store(false, Ordering::Release);
+            PENDING_USER_OPEN.store(false, Ordering::Release);
+            LAST_AUTO_HIDE_MS.store(now_ms(), Ordering::Relaxed);
+            // Keep the WebView and tray process alive. Destroying the only
+            // window can terminate the packaged desktop process, which makes
+            // a screenshot or an outside click look like a random crash.
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.hide();
+            }
+        }
+    }
+}
+
 #[tauri::command]
 fn frontend_ready(app: tauri::AppHandle) {
     FRONTEND_READY.store(true, Ordering::Release);
@@ -1092,10 +1123,7 @@ fn toggle_popover(
 
     if let Some(window) = app.get_webview_window("main") {
         if window.is_visible().unwrap_or(false) {
-            USER_OPEN_AUTHORIZED.store(false, Ordering::Release);
-            PENDING_USER_OPEN.store(false, Ordering::Release);
-            FRONTEND_READY.store(false, Ordering::Release);
-            let _ = window.destroy();
+            dismiss_popover(app);
             return;
         }
     }
@@ -1261,10 +1289,7 @@ pub fn run() {
                     WindowEvent::Focused(false)
                         if USER_OPEN_AUTHORIZED.swap(false, Ordering::AcqRel) =>
                     {
-                        PENDING_USER_OPEN.store(false, Ordering::Release);
-                        FRONTEND_READY.store(false, Ordering::Release);
-                        LAST_AUTO_HIDE_MS.store(now_ms(), Ordering::Relaxed);
-                        let _ = window.destroy();
+                        dismiss_popover(window.app_handle());
                     }
                     _ => {}
                 }
