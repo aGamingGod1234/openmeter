@@ -657,17 +657,21 @@ async fn fetch_spend() -> Vec<spend::ProviderSpend> {
     let started = std::time::Instant::now();
     // Cursor's CSV export needs the async client; fetch it here and hand it
     // to the blocking scan.
-    let cursor_csv = providers::cursor::fetch_usage_csv().await;
+    let environment = environment::launch_environment().clone();
+    let (cursor_csv, codex_history) = tokio::join!(
+        providers::cursor::fetch_usage_csv(),
+        providers::codex::token_history(&environment),
+    );
     let registry = accounts::AccountRegistry::load(&account_registry_path()).unwrap_or_default();
     let registry_for_scan = registry.clone();
-    let environment = environment::launch_environment().clone();
+    let scan_environment = environment.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        spend::collect_for_accounts(cursor_csv, &registry_for_scan, &environment)
+        spend::collect_for_accounts(cursor_csv, &registry_for_scan, &scan_environment)
     })
         .await
         .unwrap_or_default();
     let cfg = config_with_defaults(load_config());
-    let result = sync_history::merge_peer_history(
+    let mut result = sync_history::merge_peer_history(
         &result,
         &sync_runtime::peer_history(),
         &registry,
@@ -675,6 +679,14 @@ async fn fetch_spend() -> Vec<spend::ProviderSpend> {
         &chrono::Local::now().format("%Y-%m-%d").to_string(),
     )
     .total_spend;
+    if let Ok(history) = codex_history {
+        spend::apply_authoritative_tokens(
+            &mut result,
+            "codex",
+            history,
+            &chrono::Local::now().format("%Y-%m-%d").to_string(),
+        );
+    }
     eprintln!(
         "[openmeter] spend: {} providers in {:?}",
         result.len(),

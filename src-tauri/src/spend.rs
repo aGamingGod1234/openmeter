@@ -230,6 +230,11 @@ pub struct ProviderSpend {
     /// under-report and the ⚠ says so.
     pub unpriced: u64,
     pub unpriced_models: Vec<String>,
+    /// True when token totals came from the provider's account-wide backend
+    /// rather than device-local logs. The frontend uses this to prefer the
+    /// cross-device total over event-level peer projections.
+    #[serde(default)]
+    pub authoritative_tokens: bool,
     /// Normalized per-day facts used by encrypted peer history.
     pub daily: Vec<DailySpend>,
     /// Event-level normalized facts used only to build encrypted tracking
@@ -505,6 +510,7 @@ fn build_spend_at(id: &str, name: &str, data: FileData, today: i32) -> ProviderS
         trend: vec![0.0; TREND_DAYS],
         unpriced,
         unpriced_models,
+        authoritative_tokens: false,
         daily,
         tracking_events,
     };
@@ -2038,6 +2044,75 @@ mod tests {
 
     /// Live probe over this machine's real logs + Cursor export. Prints
     /// aggregates and the CSV header only. Run via
+    #[test]
+    fn authoritative_codex_tokens_replace_synced_tokens_but_preserve_cost() {
+        let local = DailySpend {
+            day: "2026-08-03".into(),
+            cost: 12.5,
+            tokens: 100.0,
+            models: vec![ModelSpend {
+                model: "gpt-5.6-sol".into(),
+                cost: 12.5,
+                tokens: 100.0,
+            }],
+            unpriced_models: vec![],
+        };
+        let peer = DailySpend {
+            day: "2026-08-03".into(),
+            cost: 7.5,
+            tokens: 200.0,
+            models: vec![ModelSpend {
+                model: "gpt-5.6-sol".into(),
+                cost: 7.5,
+                tokens: 200.0,
+            }],
+            unpriced_models: vec![],
+        };
+        let mut spend = vec![
+            super::from_daily("codex", "Codex", vec![local], "2026-08-03"),
+            super::from_daily(
+                "codex@remote",
+                "Codex (synced)",
+                vec![peer],
+                "2026-08-03",
+            ),
+            super::from_daily(
+                "hermes",
+                "Hermes",
+                vec![DailySpend {
+                    day: "2026-08-03".into(),
+                    cost: 1.0,
+                    tokens: 50.0,
+                    models: vec![],
+                    unpriced_models: vec![],
+                }],
+                "2026-08-03",
+            ),
+        ];
+        let backend = vec![DailySpend {
+            day: "2026-08-03".into(),
+            cost: 0.0,
+            tokens: 7_900.0,
+            models: vec![ModelSpend {
+                model: "gpt-5.6-sol".into(),
+                cost: 0.0,
+                tokens: 7_900.0,
+            }],
+            unpriced_models: vec![],
+        }];
+
+        super::apply_authoritative_tokens(&mut spend, "codex", backend, "2026-08-03");
+
+        let codex = spend.iter().find(|row| row.id == "codex").unwrap();
+        assert_eq!(codex.today.tokens, 7_900.0);
+        assert_eq!(codex.today.cost, 20.0);
+        assert!(codex.authoritative_tokens);
+        assert!(!spend.iter().any(|row| row.id == "codex@remote"));
+        let hermes = spend.iter().find(|row| row.id == "hermes").unwrap();
+        assert_eq!(hermes.today.tokens, 50.0);
+        assert_eq!(hermes.today.cost, 1.0);
+    }
+
     /// `cargo test --lib spend -- --ignored --nocapture`.
     #[test]
     #[ignore]
@@ -2299,6 +2374,102 @@ pub(crate) fn from_daily(
         .map(|date| date.num_days_from_ce())
         .unwrap_or_else(|_| Local::now().date_naive().num_days_from_ce());
     build_spend_at(id, name, data, today)
+}
+
+/// Replace one provider family's device-local/synced token totals with an
+/// account-wide backend history. Local and peer-derived dollars are retained
+/// because the token history endpoint does not expose billable USD.
+pub(crate) fn apply_authoritative_tokens(
+    spend: &mut Vec<ProviderSpend>,
+    provider_id: &str,
+    authoritative_daily: Vec<DailySpend>,
+    today: &str,
+) {
+    fn provider_family(id: &str) -> &str {
+        id.split_once("--")
+            .or_else(|| id.split_once('@'))
+            .map_or(id, |(provider, _)| provider)
+    }
+    let matching: Vec<usize> = spend
+        .iter()
+        .enumerate()
+        .filter_map(|(index, row)| (provider_family(&row.id) == provider_id).then_some(index))
+        .collect();
+
+    let mut costs_by_day: HashMap<String, DailySpend> = HashMap::new();
+    let mut unpriced = 0_u64;
+    let mut unpriced_models = Vec::new();
+    let mut insert_at = spend.len();
+    let mut name = provider_id.to_string();
+    for &index in &matching {
+        let row = &spend[index];
+        if row.id == provider_id || insert_at == spend.len() {
+            insert_at = index;
+            name = row.name.clone();
+        }
+        unpriced += row.unpriced;
+        unpriced_models.extend(row.unpriced_models.clone());
+        for day in &row.daily {
+            let target = costs_by_day.entry(day.day.clone()).or_insert_with(|| DailySpend {
+                day: day.day.clone(),
+                cost: 0.0,
+                tokens: 0.0,
+                models: Vec::new(),
+                unpriced_models: Vec::new(),
+            });
+            target.cost += day.cost;
+            for model in &day.models {
+                if let Some(existing) = target.models.iter_mut().find(|m| m.model == model.model) {
+                    existing.cost += model.cost;
+                } else {
+                    target.models.push(ModelSpend {
+                        model: model.model.clone(),
+                        cost: model.cost,
+                        tokens: 0.0,
+                    });
+                }
+            }
+            target.unpriced_models.extend(day.unpriced_models.clone());
+        }
+    }
+
+    let mut days = authoritative_daily;
+    for day in &mut days {
+        if let Some(costs) = costs_by_day.remove(&day.day) {
+            day.cost = costs.cost;
+            for model in &mut day.models {
+                model.cost = costs
+                    .models
+                    .iter()
+                    .find(|cost| cost.model == model.model)
+                    .map_or(0.0, |cost| cost.cost);
+            }
+            day.unpriced_models.extend(costs.unpriced_models);
+            day.unpriced_models.sort();
+            day.unpriced_models.dedup();
+        }
+    }
+    // Preserve cost on a day the backend reports as zero/missing without
+    // reintroducing any device-local tokens.
+    for (_, mut cost_day) in costs_by_day {
+        cost_day.tokens = 0.0;
+        for model in &mut cost_day.models {
+            model.tokens = 0.0;
+        }
+        days.push(cost_day);
+    }
+    days.sort_by(|left, right| left.day.cmp(&right.day));
+
+    for &index in matching.iter().rev() {
+        spend.remove(index);
+    }
+    let mut authoritative = from_daily(provider_id, &name, days, today);
+    authoritative.authoritative_tokens = true;
+    authoritative.unpriced = unpriced;
+    unpriced_models.sort();
+    unpriced_models.dedup();
+    authoritative.unpriced_models = unpriced_models;
+    spend.insert(insert_at.min(spend.len()), authoritative);
 }
 
 fn merge_window(target: &mut Window, source: Window) {

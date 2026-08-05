@@ -98,6 +98,7 @@ fn spend(id: &str, name: &str, tokens: f64) -> ProviderSpend {
         trend: vec![0.0; 30],
         unpriced: 0,
         unpriced_models: vec![],
+        authoritative_tokens: false,
         daily: vec![],
         tracking_events: vec![RawSpendEvent {
             source_id: None,

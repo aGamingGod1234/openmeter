@@ -93,6 +93,7 @@ fn local_spend(id: &str, name: &str) -> ProviderSpend {
         trend: vec![0.0; 30],
         unpriced: 0,
         unpriced_models: vec![],
+        authoritative_tokens: false,
         daily: vec![DailySpend {
             day: "2026-08-03".into(),
             cost: 1.25,

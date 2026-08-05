@@ -473,3 +473,212 @@ fn push_window_inner(
     // are kept calm on the pacing side instead.
     metrics.push(Metric::progress(label, used, None).with_reset(resets_at, Some(period_ms)));
 }
+
+/// Server-authoritative, account-wide Codex token history. The Codex CLI's
+/// app-server owns authentication and returns the same daily buckets used by
+/// the desktop profile chart. Callers retain local logs as an offline fallback.
+pub async fn token_history(
+    environment: &EnvironmentSnapshot,
+) -> Result<Vec<crate::spend::DailySpend>, String> {
+    let environment = environment.clone();
+    tauri::async_runtime::spawn_blocking(move || token_history_blocking(&environment))
+        .await
+        .map_err(|error| format!("Codex usage worker: {error}"))?
+}
+
+fn codex_app_server_path(environment: &EnvironmentSnapshot) -> Option<PathBuf> {
+    if let Some(path) = environment.var("CODEX_CLI_PATH").map(PathBuf::from) {
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+    let appdata = environment.var("APPDATA").map(PathBuf::from)?;
+    let npm_binary = appdata
+        .join("npm")
+        .join("node_modules")
+        .join("@openai")
+        .join("codex")
+        .join("node_modules")
+        .join("@openai")
+        .join("codex-win32-x64")
+        .join("vendor")
+        .join("x86_64-pc-windows-msvc")
+        .join("bin")
+        .join("codex.exe");
+    npm_binary.is_file().then_some(npm_binary)
+}
+
+fn token_history_blocking(
+    environment: &EnvironmentSnapshot,
+) -> Result<Vec<crate::spend::DailySpend>, String> {
+    use std::io::{BufRead, BufReader, Write};
+    use std::process::{Command, Stdio};
+    use std::sync::mpsc;
+    use std::time::{Duration, Instant};
+
+    let executable = codex_app_server_path(environment)
+        .ok_or("Codex CLI app-server not found; using local token history")?;
+    let mut command = Command::new(executable);
+    command
+        .args(["app-server", "--stdio"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    let mut child = command
+        .spawn()
+        .map_err(|error| format!("start Codex app-server: {error}"))?;
+    let mut stdin = child.stdin.take().ok_or("Codex app-server has no input")?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or("Codex app-server has no output")?;
+    let (sender, receiver) = mpsc::channel();
+    let reader = std::thread::spawn(move || {
+        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            if sender.send(line).is_err() {
+                break;
+            }
+        }
+    });
+
+    let requests = [
+        r#"{"id":1,"method":"initialize","params":{"clientInfo":{"name":"openmeter","version":"0.5"},"capabilities":{"experimentalApi":true}}}"#,
+        r#"{"method":"initialized","params":{}}"#,
+        r#"{"id":2,"method":"account/usage/read","params":{}}"#,
+    ];
+    let write_result = requests.iter().try_for_each(|request| {
+        writeln!(stdin, "{request}").map_err(|error| format!("write Codex request: {error}"))
+    });
+    if write_result.is_ok() {
+        let _ = stdin.flush();
+    }
+
+    let deadline = Instant::now() + Duration::from_secs(12);
+    let result = if let Err(error) = write_result {
+        Err(error)
+    } else {
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                break Err("Codex account usage timed out; using local token history".into());
+            }
+            let line = match receiver.recv_timeout(remaining) {
+                Ok(line) => line,
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    break Err("Codex account usage timed out; using local token history".into())
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    break Err("Codex app-server closed before returning usage".into())
+                }
+            };
+            let Ok(message) = serde_json::from_str::<Value>(&line) else {
+                continue;
+            };
+            if message.get("id").and_then(Value::as_i64) != Some(2) {
+                continue;
+            }
+            if message.get("error").is_some() {
+                break Err("Codex app-server rejected account usage".into());
+            }
+            let Some(document) = message.get("result") else {
+                break Err("Codex account usage response has no result".into());
+            };
+            break parse_token_history(document);
+        }
+    };
+
+    drop(stdin);
+    let _ = child.kill();
+    let _ = child.wait();
+    let _ = reader.join();
+    result
+}
+
+fn parse_token_history(document: &Value) -> Result<Vec<crate::spend::DailySpend>, String> {
+    let rows = document
+        .get("dailyUsageBuckets")
+        .and_then(Value::as_array)
+        .ok_or("Codex account usage has no daily buckets")?;
+    let mut days = Vec::with_capacity(rows.len());
+    for row in rows {
+        let day = row
+            .get("startDate")
+            .and_then(Value::as_str)
+            .ok_or("Codex account usage bucket has no date")?;
+        chrono::NaiveDate::parse_from_str(day, "%Y-%m-%d")
+            .map_err(|_| "Codex account usage bucket has an invalid date")?;
+        let tokens = row
+            .get("tokens")
+            .and_then(Value::as_i64)
+            .filter(|tokens| *tokens >= 0)
+            .ok_or("Codex account usage bucket has invalid tokens")? as f64;
+        days.push(crate::spend::DailySpend {
+            day: day.to_string(),
+            cost: 0.0,
+            tokens,
+            models: vec![crate::spend::ModelSpend {
+                model: "Account-wide".into(),
+                cost: 0.0,
+                tokens,
+            }],
+            unpriced_models: Vec::new(),
+        });
+    }
+    days.sort_by(|left, right| left.day.cmp(&right.day));
+    Ok(days)
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    #[test]
+    fn app_server_history_parses_account_wide_daily_buckets() {
+        let response = json!({
+            "summary": {
+                "lifetimeTokens": 433,
+                "peakDailyTokens": 378
+            },
+            "dailyUsageBuckets": [
+                {
+                    "startDate": "2026-08-03",
+                    "tokens": 378
+                },
+                {
+                    "startDate": "2026-08-04",
+                    "tokens": 55
+                }
+            ]
+        });
+
+        let days = super::parse_token_history(&response).unwrap();
+
+        assert_eq!(days.len(), 2);
+        assert_eq!(days[0].day, "2026-08-03");
+        assert_eq!(days[0].tokens, 378.0);
+        assert_eq!(days[0].models.len(), 1);
+        assert_eq!(days[0].models[0].model, "Account-wide");
+        assert_eq!(days[0].models[0].tokens, 378.0);
+        assert_eq!(days[1].day, "2026-08-04");
+        assert_eq!(days[1].tokens, 55.0);
+    }
+
+    #[test]
+    fn app_server_history_rejects_negative_usage_instead_of_reducing_totals() {
+        let response = json!({
+            "summary": {},
+            "dailyUsageBuckets": [{
+                "startDate": "2026-08-03",
+                "tokens": -1
+            }]
+        });
+
+        assert!(super::parse_token_history(&response).is_err());
+    }
+}

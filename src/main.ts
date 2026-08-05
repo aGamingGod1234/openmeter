@@ -4,6 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
 import type { Metric, Snapshot, UpdateChannel } from "./models";
 import { snapshotProviderId } from "./models";
+import { selectAggregateSpend } from "./aggregate-spend";
 import type { Layout, ProviderLayout } from "./layout";
 import { migrateLayout, resetDashboardViewport, snapshotCardId } from "./layout";
 import {
@@ -100,6 +101,7 @@ interface ProviderSpend {
   trend: number[];
   unpriced: number;
   unpriced_models: string[];
+  authoritative_tokens?: boolean;
   daily?: Array<{
     day: string;
     cost: number;
@@ -875,55 +877,12 @@ function activeSpend(): ProviderSpend[] {
   }
   const rows = filterTracking(lastTracking, trackingDevice).days;
   const today = new Date().toISOString().slice(0, 10);
-  const yesterday = shiftDay(today, -1);
-  const first30 = shiftDay(today, -29);
-  const byProvider = new Map<string, typeof rows>();
-  for (const row of rows) {
-    const list = byProvider.get(row.provider_id) ?? [];
-    list.push(row);
-    byProvider.set(row.provider_id, list);
-  }
-  return [...byProvider.entries()].map(([providerId, providerRows]) => {
-    const window = (selected: typeof rows): SpendWindow => {
-      const models = new Map<string, ModelSpend>();
-      for (const row of selected) {
-        const model = models.get(row.model) ?? { model: row.model, cost: 0, tokens: 0 };
-        model.cost += row.cost;
-        model.tokens += row.tokens;
-        models.set(row.model, model);
-      }
-      return {
-        cost: selected.reduce((sum, row) => sum + row.cost, 0),
-        tokens: selected.reduce((sum, row) => sum + row.tokens, 0),
-        models: [...models.values()].sort((left, right) => right.cost - left.cost),
-      };
-    };
-    const trend = Array.from({ length: 30 }, (_, index) => {
-      const day = shiftDay(today, index - 29);
-      return providerRows
-        .filter((row) => row.day === day)
-        .reduce((sum, row) => sum + row.tokens, 0);
-    });
-    return {
-      id: providerId,
-      name:
-        lastSnapshots.find((snapshot) => snapshotProviderId(snapshot) === providerId)?.name ??
-        providerId,
-      today: window(providerRows.filter((row) => row.day === today)),
-      yesterday: window(providerRows.filter((row) => row.day === yesterday)),
-      last30: window(providerRows.filter((row) => row.day >= first30 && row.day <= today)),
-      trend,
-      unpriced: 0,
-      unpriced_models: [],
-    };
-  });
+  const names = new Map(
+    lastSnapshots.map((snapshot) => [snapshotProviderId(snapshot), snapshot.name]),
+  );
+  return selectAggregateSpend(lastSpend, { devices: lastTracking.devices, days: rows }, today, names);
 }
 
-function shiftDay(day: string, delta: number): string {
-  const date = new Date(`${day}T00:00:00Z`);
-  date.setUTCDate(date.getUTCDate() + delta);
-  return date.toISOString().slice(0, 10);
-}
 /// Providers under this many dollars (in the visible window) fold into
 /// one "Others" wedge; hovering it lists who spent what. The bar scales
 /// with the period — a day's ring earns a slice at $5, a month's at $10.
