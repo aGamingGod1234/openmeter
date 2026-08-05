@@ -291,6 +291,103 @@ function Remove-OpenMeterLegacyStartup {
     return $true
 }
 
+function Disable-OpenMeterLegacyInstall {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$LegacyRoot,
+        [Parameter(Mandatory)][string]$BackupRoot,
+        [Parameter(Mandatory)][string[]]$StartMenuRoots,
+        [string]$RunKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+    )
+
+    $legacyFull = [System.IO.Path]::GetFullPath($LegacyRoot).TrimEnd('\')
+    $backupFull = [System.IO.Path]::GetFullPath($BackupRoot).TrimEnd('\')
+    if ($backupFull.Equals($legacyFull, [StringComparison]::OrdinalIgnoreCase) -or
+        $backupFull.StartsWith("$legacyFull\", [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Legacy backup root must be outside the active legacy installation.'
+    }
+    $legacyExe = Join-Path $legacyFull 'openmeter-tray.exe'
+
+    $matchingShortcuts = @()
+    $shell = New-Object -ComObject WScript.Shell
+    foreach ($root in $StartMenuRoots) {
+        if (-not (Test-Path -LiteralPath $root -PathType Container)) { continue }
+        foreach ($shortcutPath in Get-ChildItem -LiteralPath $root -Recurse -Filter '*.lnk' -File -ErrorAction SilentlyContinue) {
+            $shortcut = $shell.CreateShortcut($shortcutPath.FullName)
+            if ([string]::IsNullOrWhiteSpace($shortcut.TargetPath)) { continue }
+            $target = [System.IO.Path]::GetFullPath($shortcut.TargetPath)
+            if ($target.Equals($legacyExe, [StringComparison]::OrdinalIgnoreCase) -or
+                $target.StartsWith("$legacyFull\", [StringComparison]::OrdinalIgnoreCase)) {
+                $matchingShortcuts += $shortcutPath.FullName
+            }
+        }
+    }
+
+    $legacyExists = Test-Path -LiteralPath $legacyFull -PathType Container
+    $startupRemoved = Remove-OpenMeterLegacyStartup -RunKey $RunKey -ExpectedPath $legacyExe
+    if (-not $legacyExists -and $matchingShortcuts.Count -eq 0) {
+        return $null
+    }
+
+    foreach ($process in Get-CimInstance Win32_Process -Filter "Name='openmeter-tray.exe'" -ErrorAction SilentlyContinue) {
+        if ([string]::IsNullOrWhiteSpace($process.ExecutablePath)) { continue }
+        $processPath = [System.IO.Path]::GetFullPath([string]$process.ExecutablePath)
+        if ($processPath.Equals($legacyExe, [StringComparison]::OrdinalIgnoreCase) -or
+            $processPath.StartsWith("$legacyFull\", [StringComparison]::OrdinalIgnoreCase)) {
+            Stop-Process -Id $process.ProcessId -Force -ErrorAction Stop
+        }
+    }
+
+    $stamp = [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssfffZ')
+    $disabledRoot = Join-Path $backupFull "$stamp-$([guid]::NewGuid().ToString('N'))"
+    $shortcutBackup = Join-Path $disabledRoot 'shortcuts'
+    New-Item -ItemType Directory -Path $disabledRoot, $shortcutBackup -Force | Out-Null
+
+    foreach ($shortcutPath in $matchingShortcuts) {
+        $destination = Join-Path $shortcutBackup ([System.IO.Path]::GetFileName($shortcutPath))
+        if (Test-Path -LiteralPath $destination) {
+            $destination = Join-Path $shortcutBackup ("{0}-{1}.lnk" -f
+                [System.IO.Path]::GetFileNameWithoutExtension($shortcutPath),
+                [guid]::NewGuid().ToString('N'))
+        }
+        Move-Item -LiteralPath $shortcutPath -Destination $destination
+    }
+    if ($legacyExists) {
+        Move-Item -LiteralPath $legacyFull -Destination (Join-Path $disabledRoot 'install')
+    }
+
+    return $disabledRoot
+}
+
+function Assert-OpenMeterRuntimeOrigin {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$InstallLocation,
+        [object[]]$Processes
+    )
+
+    if (-not $PSBoundParameters.ContainsKey('Processes')) {
+        $Processes = @(Get-CimInstance Win32_Process -Filter "Name='openmeter-tray.exe'" -ErrorAction Stop)
+    }
+    if (@($Processes).Count -ne 1) {
+        throw "Expected exactly one OpenMeter tray process, found $(@($Processes).Count)."
+    }
+
+    $expected = [System.IO.Path]::GetFullPath((Join-Path $InstallLocation 'VFS\ProgramFilesX64\OpenMeter\openmeter-tray.exe'))
+    $actualValue = [string]$Processes[0].ExecutablePath
+    if ([string]::IsNullOrWhiteSpace($actualValue) -and $Processes[0].PSObject.Properties['Path']) {
+        $actualValue = [string]$Processes[0].Path
+    }
+    if ([string]::IsNullOrWhiteSpace($actualValue)) {
+        throw 'OpenMeter tray process path is unavailable.'
+    }
+    $actual = [System.IO.Path]::GetFullPath($actualValue)
+    if (-not $actual.Equals($expected, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "OpenMeter health check was served by an unexpected runtime: $actual"
+    }
+    return $expected
+}
+
 function Install-OpenMeterPrivateMsix {
     [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'Medium')]
     param(
@@ -334,6 +431,8 @@ function Install-OpenMeterPrivateMsix {
         } while ($statusCode -ne 200 -and [DateTime]::UtcNow -lt $deadline)
         if ($statusCode -ne 200) { throw 'OpenMeter local API did not return HTTP 200 after installation.' }
 
+        $runtimePath = Assert-OpenMeterRuntimeOrigin -InstallLocation $package.InstallLocation
+
         $dataRoot = [System.IO.Path]::GetFullPath((Join-Path $env:APPDATA 'OpenMeter'))
         if ($env:OneDrive -and $dataRoot.StartsWith([System.IO.Path]::GetFullPath($env:OneDrive), [StringComparison]::OrdinalIgnoreCase)) {
             throw "OpenMeter data root is inside OneDrive: $dataRoot"
@@ -345,6 +444,7 @@ function Install-OpenMeterPrivateMsix {
             InstallLocation = $package.InstallLocation
             Thumbprint = $thumbprint
             ApiStatus = $statusCode
+            RuntimePath = $runtimePath
             DataRoot = $dataRoot
         }
     }
@@ -365,5 +465,7 @@ Export-ModuleMember -Function @(
     'Test-OpenMeterPrivatePackage',
     'Assert-OpenMeterMsixTrust',
     'Remove-OpenMeterLegacyStartup',
+    'Disable-OpenMeterLegacyInstall',
+    'Assert-OpenMeterRuntimeOrigin',
     'Install-OpenMeterPrivateMsix'
 )

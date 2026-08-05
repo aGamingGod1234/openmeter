@@ -22,11 +22,16 @@ if (-not $PackagePath -or -not $CertificatePath -or -not $ExpectedThumbprint) {
 }
 
 Import-Module (Join-Path $PSScriptRoot 'PrivateMsix.psm1') -Force
-$legacyPath = Join-Path $env:LOCALAPPDATA 'OpenMeter\openmeter-tray.exe'
-Remove-OpenMeterLegacyStartup -ExpectedPath $legacyPath | Out-Null
-Get-Process -Name 'openmeter-tray' -ErrorAction SilentlyContinue |
-    Where-Object { $_.Path -and $_.Path.Equals($legacyPath, [StringComparison]::OrdinalIgnoreCase) } |
-    Stop-Process -Force
+$legacyRoot = Join-Path $env:LOCALAPPDATA 'OpenMeter'
+$legacyBackupRoot = Join-Path $env:LOCALAPPDATA 'OpenMeter Legacy Backups'
+$startMenuRoots = @(
+    (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'),
+    (Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs')
+)
+$legacyBackup = Disable-OpenMeterLegacyInstall `
+    -LegacyRoot $legacyRoot `
+    -BackupRoot $legacyBackupRoot `
+    -StartMenuRoots $startMenuRoots
 
 $trustPath = "Cert:\LocalMachine\TrustedPeople\$($ExpectedThumbprint.ToUpperInvariant())"
 $addedMachineTrust = -not (Test-Path -LiteralPath $trustPath -PathType Leaf)
@@ -71,7 +76,9 @@ $acceptancePath = Join-Path (Split-Path -Parent $PackagePath) 'acceptance.json'
     certificateThumbprint = $result.Thumbprint
     certificateStore = 'LocalMachine\TrustedPeople'
     localApiStatus = $result.ApiStatus
+    runtimePath = $result.RuntimePath
     dataRoot = $result.DataRoot
+    legacyBackup = $legacyBackup
 } | ConvertTo-Json | Set-Content -LiteralPath $acceptancePath -Encoding UTF8
 
 Write-Host "OpenMeter private MSIX installed: $($result.PackageFullName)"

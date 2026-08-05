@@ -255,6 +255,46 @@ function Test-InstallValidation {
         try { Remove-OpenMeterLegacyStartup -RunKey $testRunKey -ExpectedPath $legacyPath | Out-Null } catch { $unexpectedRejected = $true }
         Assert-True $unexpectedRejected 'Unexpected startup target was removed'
         Assert-Equal (Get-ItemPropertyValue -LiteralPath $testRunKey -Name OpenMeter) $unexpectedPath 'Unexpected startup target was mutated'
+
+        Remove-ItemProperty -LiteralPath $testRunKey -Name OpenMeter
+        $legacyRoot = Join-Path $scratch 'legacy\OpenMeter'
+        $legacyExe = Join-Path $legacyRoot 'openmeter-tray.exe'
+        $startMenuRoot = Join-Path $scratch 'Start Menu\Programs'
+        $shortcutPath = Join-Path $startMenuRoot 'OpenMeter.lnk'
+        $backupRoot = Join-Path $scratch 'disabled'
+        New-Item -ItemType Directory -Path $legacyRoot, $startMenuRoot -Force | Out-Null
+        [System.IO.File]::WriteAllText($legacyExe, 'legacy-runtime')
+        $shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcutPath)
+        $shortcut.TargetPath = $legacyExe
+        $shortcut.Save()
+        Set-ItemProperty -LiteralPath $testRunKey -Name OpenMeter -Value $legacyExe
+
+        $disabledRoot = Disable-OpenMeterLegacyInstall `
+            -LegacyRoot $legacyRoot `
+            -BackupRoot $backupRoot `
+            -StartMenuRoots @($startMenuRoot) `
+            -RunKey $testRunKey
+        Assert-True (-not (Test-Path -LiteralPath $legacyRoot)) 'Legacy installation remained active'
+        Assert-True (-not (Test-Path -LiteralPath $shortcutPath)) 'Legacy Start Menu shortcut remained searchable'
+        Assert-True ($null -eq (Get-ItemProperty -LiteralPath $testRunKey -Name OpenMeter -ErrorAction SilentlyContinue)) 'Legacy Run value remained active'
+        Assert-True (Test-Path -LiteralPath (Join-Path $disabledRoot 'install\openmeter-tray.exe') -PathType Leaf) 'Legacy executable was not retained in the recovery backup'
+        Assert-True (Test-Path -LiteralPath (Join-Path $disabledRoot 'shortcuts\OpenMeter.lnk') -PathType Leaf) 'Legacy shortcut was not retained in the recovery backup'
+
+        $fakeInstall = Join-Path $scratch 'WindowsApps\OpenMeter.Private_0.5.0.12_x64__fixture'
+        $packagedExe = Join-Path $fakeInstall 'VFS\ProgramFilesX64\OpenMeter\openmeter-tray.exe'
+        $acceptedPath = Assert-OpenMeterRuntimeOrigin `
+            -InstallLocation $fakeInstall `
+            -Processes @([pscustomobject]@{ ExecutablePath = $packagedExe })
+        Assert-Equal $acceptedPath ([System.IO.Path]::GetFullPath($packagedExe)) 'Packaged runtime origin was not accepted'
+
+        $legacyRuntimeAccepted = $true
+        try {
+            Assert-OpenMeterRuntimeOrigin `
+                -InstallLocation $fakeInstall `
+                -Processes @([pscustomobject]@{ ExecutablePath = 'C:\Users\Example\AppData\Local\OpenMeter\openmeter-tray.exe' }) | Out-Null
+        }
+        catch { $legacyRuntimeAccepted = $false }
+        Assert-True (-not $legacyRuntimeAccepted) 'Legacy runtime satisfied packaged acceptance'
     }
     finally {
         $trustedAfter = Test-Path -LiteralPath "Cert:\LocalMachine\TrustedPeople\$($certificate.Thumbprint)"
