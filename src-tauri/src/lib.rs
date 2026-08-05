@@ -940,6 +940,7 @@ fn spawn_update_checker(app: &tauri::AppHandle) {
 static LAST_AUTO_HIDE_MS: AtomicU64 = AtomicU64::new(0);
 static FRONTEND_READY: AtomicBool = AtomicBool::new(false);
 static USER_OPEN_AUTHORIZED: AtomicBool = AtomicBool::new(false);
+static PENDING_USER_OPEN: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum PopoverTrigger {
@@ -960,6 +961,13 @@ fn should_hide_unrequested_window(user_open_authorized: bool) -> bool {
     !user_open_authorized
 }
 
+fn is_explicit_open(trigger: PopoverTrigger) -> bool {
+    matches!(
+        trigger,
+        PopoverTrigger::TrayClick | PopoverTrigger::GlobalShortcut
+    )
+}
+
 fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -969,7 +977,9 @@ fn now_ms() -> u64 {
 
 #[cfg(test)]
 mod window_lifecycle_tests {
-    use super::{should_hide_unrequested_window, should_show_popover, PopoverTrigger};
+    use super::{
+        is_explicit_open, should_hide_unrequested_window, should_show_popover, PopoverTrigger,
+    };
 
     #[test]
     fn automatic_process_activations_never_open_the_window() {
@@ -992,42 +1002,46 @@ mod window_lifecycle_tests {
         assert!(should_hide_unrequested_window(false));
         assert!(!should_hide_unrequested_window(true));
     }
-}
 
-#[tauri::command]
-fn frontend_ready(app: tauri::AppHandle) {
-    FRONTEND_READY.store(true, Ordering::Release);
-    if let Some(window) = app.get_webview_window("main") {
-        if should_hide_unrequested_window(USER_OPEN_AUTHORIZED.load(Ordering::Acquire)) {
-            let _ = window.hide();
-        }
+    #[test]
+    fn only_explicit_user_actions_may_create_the_lazy_window() {
+        assert!(is_explicit_open(PopoverTrigger::TrayClick));
+        assert!(is_explicit_open(PopoverTrigger::GlobalShortcut));
+        assert!(!is_explicit_open(PopoverTrigger::AutomaticActivation));
     }
 }
 
-fn toggle_popover(
-    app: &tauri::AppHandle,
-    click: tauri::PhysicalPosition<f64>,
-    trigger: PopoverTrigger,
-) {
-    if !should_show_popover(trigger, FRONTEND_READY.load(Ordering::Acquire)) {
-        return;
+fn create_popover(app: &tauri::AppHandle) -> Result<(), String> {
+    if app.get_webview_window("main").is_some() {
+        return Ok(());
     }
+    FRONTEND_READY.store(false, Ordering::Release);
+    tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App("index.html".into()))
+        .title("OpenMeter")
+        .inner_size(380.0, 600.0)
+        .resizable(false)
+        .decorations(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .visible(false)
+        .focused(false)
+        .shadow(true)
+        .disable_drag_drop_handler()
+        .background_color(tauri::webview::Color(13, 13, 15, 255))
+        .build()
+        .map_err(|error| error.to_string())?;
+
+    let privacy_mode = config_with_defaults(load_config())
+        .get("privacyMode")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    apply_privacy_mode(app, privacy_mode)
+}
+
+fn show_popover(app: &tauri::AppHandle, click: tauri::PhysicalPosition<f64>) {
     let Some(window) = app.get_webview_window("main") else {
         return;
     };
-
-    if window.is_visible().unwrap_or(false) {
-        USER_OPEN_AUTHORIZED.store(false, Ordering::Release);
-        let _ = window.hide();
-        return;
-    }
-
-    if now_ms().saturating_sub(LAST_AUTO_HIDE_MS.load(Ordering::Relaxed)) < 300 {
-        return;
-    }
-
-    // Anchor the popover's bottom-right corner near the tray click,
-    // which sits next to the clock on a standard bottom taskbar.
     let size = window
         .outer_size()
         .unwrap_or(tauri::PhysicalSize::new(380, 600));
@@ -1038,6 +1052,57 @@ fn toggle_popover(
     let _ = window.show();
     let _ = window.set_focus();
     let _ = window.emit("popover-shown", ());
+}
+
+#[tauri::command]
+fn frontend_ready(app: tauri::AppHandle) {
+    FRONTEND_READY.store(true, Ordering::Release);
+    if PENDING_USER_OPEN.swap(false, Ordering::AcqRel) {
+        let click = app
+            .cursor_position()
+            .unwrap_or(tauri::PhysicalPosition::new(1200.0, 700.0));
+        show_popover(&app, click);
+    }
+}
+
+fn toggle_popover(
+    app: &tauri::AppHandle,
+    click: tauri::PhysicalPosition<f64>,
+    trigger: PopoverTrigger,
+) {
+    if !is_explicit_open(trigger) {
+        return;
+    }
+
+    if now_ms().saturating_sub(LAST_AUTO_HIDE_MS.load(Ordering::Relaxed)) < 300 {
+        return;
+    }
+
+    if let Some(window) = app.get_webview_window("main") {
+        if window.is_visible().unwrap_or(false) {
+            USER_OPEN_AUTHORIZED.store(false, Ordering::Release);
+            PENDING_USER_OPEN.store(false, Ordering::Release);
+            FRONTEND_READY.store(false, Ordering::Release);
+            let _ = window.destroy();
+            return;
+        }
+    }
+
+    if app.get_webview_window("main").is_none() {
+        PENDING_USER_OPEN.store(true, Ordering::Release);
+        if let Err(error) = create_popover(app) {
+            PENDING_USER_OPEN.store(false, Ordering::Release);
+            eprintln!("[openmeter] create popover: {error}");
+        }
+        return;
+    }
+
+    if !should_show_popover(trigger, FRONTEND_READY.load(Ordering::Acquire)) {
+        PENDING_USER_OPEN.store(true, Ordering::Release);
+        return;
+    }
+
+    show_popover(app, click);
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -1094,9 +1159,8 @@ pub fn run() {
         ])
         .setup(|app| {
             USER_OPEN_AUTHORIZED.store(false, Ordering::Release);
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.hide();
-            }
+            PENDING_USER_OPEN.store(false, Ordering::Release);
+            FRONTEND_READY.store(false, Ordering::Release);
             spawn_update_checker(app.handle());
             sync_runtime::spawn_scheduler();
             let quit = MenuItem::with_id(app, "quit", "Quit OpenMeter", true, None::<&str>)?;
@@ -1183,9 +1247,11 @@ pub fn run() {
                         let _ = window.hide();
                     }
                     WindowEvent::Focused(false) => {
-                        USER_OPEN_AUTHORIZED.store(false, Ordering::Release);
-                        if window.hide().is_ok() {
+                        if USER_OPEN_AUTHORIZED.swap(false, Ordering::AcqRel) {
+                            PENDING_USER_OPEN.store(false, Ordering::Release);
+                            FRONTEND_READY.store(false, Ordering::Release);
                             LAST_AUTO_HIDE_MS.store(now_ms(), Ordering::Relaxed);
+                            let _ = window.destroy();
                         }
                     }
                     _ => {}
