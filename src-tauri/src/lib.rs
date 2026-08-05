@@ -994,31 +994,12 @@ mod window_lifecycle_tests {
     }
 }
 
-/// Tells WebView2 to release memory while the popover is hidden and return
-/// to normal when it shows. Tauri doesn't expose wry's setter for this, so
-/// we make the same COM calls wry does (SetMemoryUsageTargetLevel).
-fn set_webview_memory_level(window: &tauri::WebviewWindow, low: bool) {
-    let _ = window.with_webview(move |webview| unsafe {
-        use webview2_com::Microsoft::Web::WebView2::Win32::{
-            ICoreWebView2_19, COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL,
-        };
-        use windows_core::Interface;
-        if let Ok(core) = webview.controller().CoreWebView2() {
-            if let Ok(wv19) = core.cast::<ICoreWebView2_19>() {
-                let level = COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL(if low { 1 } else { 0 });
-                let _ = wv19.SetMemoryUsageTargetLevel(level);
-            }
-        }
-    });
-}
-
 #[tauri::command]
 fn frontend_ready(app: tauri::AppHandle) {
     FRONTEND_READY.store(true, Ordering::Release);
     if let Some(window) = app.get_webview_window("main") {
         if should_hide_unrequested_window(USER_OPEN_AUTHORIZED.load(Ordering::Acquire)) {
             let _ = window.hide();
-            set_webview_memory_level(&window, true);
         }
     }
 }
@@ -1038,15 +1019,12 @@ fn toggle_popover(
     if window.is_visible().unwrap_or(false) {
         USER_OPEN_AUTHORIZED.store(false, Ordering::Release);
         let _ = window.hide();
-        set_webview_memory_level(&window, true);
         return;
     }
 
     if now_ms().saturating_sub(LAST_AUTO_HIDE_MS.load(Ordering::Relaxed)) < 300 {
         return;
     }
-
-    set_webview_memory_level(&window, false);
 
     // Anchor the popover's bottom-right corner near the tray click,
     // which sits next to the clock on a standard bottom taskbar.
@@ -1151,10 +1129,6 @@ pub fn run() {
                 })
                 .build(app)?;
 
-            // Keep normal WebView2 scheduling until the frontend confirms its
-            // DOM, listeners, and initial render are installed. Lowering the
-            // memory target sooner can suspend a hidden renderer mid-startup.
-
             let config = config_with_defaults(load_config());
             httpapi::set_policy(httpapi::ApiPolicy {
                 allow_browser_cors: config
@@ -1212,9 +1186,6 @@ pub fn run() {
                         USER_OPEN_AUTHORIZED.store(false, Ordering::Release);
                         if window.hide().is_ok() {
                             LAST_AUTO_HIDE_MS.store(now_ms(), Ordering::Relaxed);
-                            if let Some(wv) = window.app_handle().get_webview_window("main") {
-                                set_webview_memory_level(&wv, true);
-                            }
                         }
                     }
                     _ => {}
