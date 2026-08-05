@@ -1258,13 +1258,13 @@ pub fn run() {
                     {
                         let _ = window.hide();
                     }
-                    WindowEvent::Focused(false) => {
-                        if USER_OPEN_AUTHORIZED.swap(false, Ordering::AcqRel) {
-                            PENDING_USER_OPEN.store(false, Ordering::Release);
-                            FRONTEND_READY.store(false, Ordering::Release);
-                            LAST_AUTO_HIDE_MS.store(now_ms(), Ordering::Relaxed);
-                            let _ = window.destroy();
-                        }
+                    WindowEvent::Focused(false)
+                        if USER_OPEN_AUTHORIZED.swap(false, Ordering::AcqRel) =>
+                    {
+                        PENDING_USER_OPEN.store(false, Ordering::Release);
+                        FRONTEND_READY.store(false, Ordering::Release);
+                        LAST_AUTO_HIDE_MS.store(now_ms(), Ordering::Relaxed);
+                        let _ = window.destroy();
                     }
                     _ => {}
                 }
