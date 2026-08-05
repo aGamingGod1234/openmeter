@@ -22,7 +22,7 @@ mod telemetry;
 pub mod updates;
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
@@ -539,7 +539,11 @@ fn update_tray_strip(app: tauri::AppHandle, entries: Vec<StripEntry>) -> Result<
                             ..
                         } = event
                         {
-                            toggle_popover(tray.app_handle(), position);
+                            toggle_popover(
+                                tray.app_handle(),
+                                position,
+                                PopoverTrigger::TrayClick,
+                            );
                         }
                     })
                     .build(&handle);
@@ -769,7 +773,7 @@ fn register_shortcut(app: &tauri::AppHandle, accel: &str) -> Result<(), String> 
             let pos = app
                 .cursor_position()
                 .unwrap_or(tauri::PhysicalPosition::new(1200.0, 700.0));
-            toggle_popover(app, pos);
+            toggle_popover(app, pos, PopoverTrigger::GlobalShortcut);
         }
     })
     .map_err(|e| format!("register shortcut: {e}"))
@@ -934,12 +938,60 @@ fn spawn_update_checker(app: &tauri::AppHandle) {
 // closed. We remember when the last auto-hide happened and ignore tray
 // clicks that arrive right after it.
 static LAST_AUTO_HIDE_MS: AtomicU64 = AtomicU64::new(0);
+static FRONTEND_READY: AtomicBool = AtomicBool::new(false);
+static USER_OPEN_AUTHORIZED: AtomicBool = AtomicBool::new(false);
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PopoverTrigger {
+    TrayClick,
+    GlobalShortcut,
+    AutomaticActivation,
+}
+
+fn should_show_popover(trigger: PopoverTrigger, frontend_ready: bool) -> bool {
+    frontend_ready
+        && matches!(
+            trigger,
+            PopoverTrigger::TrayClick | PopoverTrigger::GlobalShortcut
+        )
+}
+
+fn should_hide_unrequested_window(user_open_authorized: bool) -> bool {
+    !user_open_authorized
+}
 
 fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod window_lifecycle_tests {
+    use super::{should_hide_unrequested_window, should_show_popover, PopoverTrigger};
+
+    #[test]
+    fn automatic_process_activations_never_open_the_window() {
+        assert!(!should_show_popover(
+            PopoverTrigger::AutomaticActivation,
+            true
+        ));
+    }
+
+    #[test]
+    fn explicit_open_waits_for_the_renderer() {
+        assert!(!should_show_popover(PopoverTrigger::TrayClick, false));
+        assert!(!should_show_popover(PopoverTrigger::GlobalShortcut, false));
+        assert!(should_show_popover(PopoverTrigger::TrayClick, true));
+        assert!(should_show_popover(PopoverTrigger::GlobalShortcut, true));
+    }
+
+    #[test]
+    fn windows_visibility_without_user_authorization_is_hidden() {
+        assert!(should_hide_unrequested_window(false));
+        assert!(!should_hide_unrequested_window(true));
+    }
 }
 
 /// Tells WebView2 to release memory while the popover is hidden and return
@@ -960,12 +1012,31 @@ fn set_webview_memory_level(window: &tauri::WebviewWindow, low: bool) {
     });
 }
 
-fn toggle_popover(app: &tauri::AppHandle, click: tauri::PhysicalPosition<f64>) {
+#[tauri::command]
+fn frontend_ready(app: tauri::AppHandle) {
+    FRONTEND_READY.store(true, Ordering::Release);
+    if let Some(window) = app.get_webview_window("main") {
+        if should_hide_unrequested_window(USER_OPEN_AUTHORIZED.load(Ordering::Acquire)) {
+            let _ = window.hide();
+            set_webview_memory_level(&window, true);
+        }
+    }
+}
+
+fn toggle_popover(
+    app: &tauri::AppHandle,
+    click: tauri::PhysicalPosition<f64>,
+    trigger: PopoverTrigger,
+) {
+    if !should_show_popover(trigger, FRONTEND_READY.load(Ordering::Acquire)) {
+        return;
+    }
     let Some(window) = app.get_webview_window("main") else {
         return;
     };
 
     if window.is_visible().unwrap_or(false) {
+        USER_OPEN_AUTHORIZED.store(false, Ordering::Release);
         let _ = window.hide();
         set_webview_memory_level(&window, true);
         return;
@@ -985,6 +1056,7 @@ fn toggle_popover(app: &tauri::AppHandle, click: tauri::PhysicalPosition<f64>) {
     let x = (click.x - f64::from(size.width)).max(0.0);
     let y = (click.y - f64::from(size.height) - 8.0).max(0.0);
     let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
+    USER_OPEN_AUTHORIZED.store(true, Ordering::Release);
     let _ = window.show();
     let _ = window.set_focus();
     let _ = window.emit("popover-shown", ());
@@ -994,13 +1066,14 @@ fn toggle_popover(app: &tauri::AppHandle, click: tauri::PhysicalPosition<f64>) {
 pub fn run() {
     let _ = environment::install_launch_environment(environment::EnvironmentSnapshot::capture());
     tauri::Builder::default()
-        // Second launches just poke the existing instance's popover open
-        // instead of spawning a duplicate tray icon (Mac parity).
+        // A second process must never surface the window. This occurs during
+        // packaged updates and login startup; only an explicit tray click or
+        // configured shortcut is allowed to open the popover.
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             let pos = app
                 .cursor_position()
                 .unwrap_or(tauri::PhysicalPosition::new(1200.0, 700.0));
-            toggle_popover(app, pos);
+            toggle_popover(app, pos, PopoverTrigger::AutomaticActivation);
         }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_autostart::init(
@@ -1038,9 +1111,14 @@ pub fn run() {
             sync_revoke_device,
             sync_disable,
             fetch_tracking,
-            sync_set_device_label
+            sync_set_device_label,
+            frontend_ready
         ])
         .setup(|app| {
+            USER_OPEN_AUTHORIZED.store(false, Ordering::Release);
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.hide();
+            }
             spawn_update_checker(app.handle());
             sync_runtime::spawn_scheduler();
             let quit = MenuItem::with_id(app, "quit", "Quit OpenMeter", true, None::<&str>)?;
@@ -1064,16 +1142,18 @@ pub fn run() {
                         ..
                     } = event
                     {
-                        toggle_popover(tray.app_handle(), position);
+                        toggle_popover(
+                            tray.app_handle(),
+                            position,
+                            PopoverTrigger::TrayClick,
+                        );
                     }
                 })
                 .build(app)?;
 
-            // The popover starts hidden, so start the webview in low-memory
-            // mode too; it flips to normal the first time it is shown.
-            if let Some(wv) = app.get_webview_window("main") {
-                set_webview_memory_level(&wv, true);
-            }
+            // Keep normal WebView2 scheduling until the frontend confirms its
+            // DOM, listeners, and initial render are installed. Lowering the
+            // memory target sooner can suspend a hidden renderer mid-startup.
 
             let config = config_with_defaults(load_config());
             httpapi::set_policy(httpapi::ApiPolicy {
@@ -1120,13 +1200,24 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             if window.label() == "main" {
-                if let WindowEvent::Focused(false) = event {
-                    if window.hide().is_ok() {
-                        LAST_AUTO_HIDE_MS.store(now_ms(), Ordering::Relaxed);
-                        if let Some(wv) = window.app_handle().get_webview_window("main") {
-                            set_webview_memory_level(&wv, true);
+                match event {
+                    WindowEvent::Focused(true)
+                        if should_hide_unrequested_window(
+                            USER_OPEN_AUTHORIZED.load(Ordering::Acquire),
+                        ) =>
+                    {
+                        let _ = window.hide();
+                    }
+                    WindowEvent::Focused(false) => {
+                        USER_OPEN_AUTHORIZED.store(false, Ordering::Release);
+                        if window.hide().is_ok() {
+                            LAST_AUTO_HIDE_MS.store(now_ms(), Ordering::Relaxed);
+                            if let Some(wv) = window.app_handle().get_webview_window("main") {
+                                set_webview_memory_level(&wv, true);
+                            }
                         }
                     }
+                    _ => {}
                 }
             }
         })

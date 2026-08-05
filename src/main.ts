@@ -3430,6 +3430,11 @@ window.addEventListener("DOMContentLoaded", () => {
     void getVersion().then((v) => {
       pendingWhatsNew = computeWhatsNew(v);
     });
+
+    // Rust keeps the native window hidden until this complete startup path
+    // has loaded settings and installed the UI. This prevents WebView2's
+    // blank bootstrap surface from ever being exposed during login/update.
+    void invoke("frontend_ready");
   });
 
   // Countdown texts ("Resets in 3h 41m") tick every 30 s — but only for

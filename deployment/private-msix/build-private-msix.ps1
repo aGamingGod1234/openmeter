@@ -45,7 +45,7 @@ else {
         & npm.cmd run build
         if ($LASTEXITCODE -ne 0) { throw "Frontend build failed with exit code $LASTEXITCODE." }
 
-        & cargo.exe build --release --manifest-path 'src-tauri\Cargo.toml' --bin openmeter-tray --bin openmeter
+        & cargo.exe build --release --features 'custom-protocol' --manifest-path 'src-tauri\Cargo.toml' --bin openmeter-tray --bin openmeter
         if ($LASTEXITCODE -ne 0) { throw "OpenMeter release build failed with exit code $LASTEXITCODE." }
 
         & cargo.exe build --release --manifest-path 'sync-hub\Cargo.toml'

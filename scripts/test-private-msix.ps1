@@ -30,6 +30,11 @@ if (-not (Test-Path -LiteralPath $modulePath -PathType Leaf)) {
 Import-Module $modulePath -Force
 
 function Test-Layout {
+    $cargoManifest = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'src-tauri\Cargo.toml')
+    $buildScript = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'deployment\private-msix\build-private-msix.ps1')
+    Assert-True ($cargoManifest -match 'custom-protocol\s*=\s*\["tauri/custom-protocol"\]') 'Tauri production custom-protocol feature is missing'
+    Assert-True ($buildScript.Contains("--features 'custom-protocol'")) 'Private MSIX build does not enable Tauri custom-protocol'
+
     $scratch = Join-Path ([System.IO.Path]::GetTempPath()) ("openmeter-msix-layout-{0}" -f [guid]::NewGuid().ToString('N'))
     $inputRoot = Join-Path $scratch 'input'
     $outputRoot = Join-Path $scratch 'layout'
