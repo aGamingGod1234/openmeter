@@ -107,21 +107,27 @@
     <aside id="settings" aria-label="Settings">
       <div class="panel-head glass-bar">
         <button class="mini-btn" id="settings-close">&#8592; Done</button>
-        <span class="panel-title">Settings</span>
+        <div>
+          <span class="panel-eyebrow">OpenMeter</span>
+          <span class="panel-title">Settings</span>
+        </div>
       </div>
 
-      <div class="acc-group open">
-        <button class="acc-head">General <span class="chev">&#8964;</span></button>
+      <div class="settings-shell">
+        <div id="settings-nav-slot"></div>
+        <div id="settings-content" class="settings-content">
+      <div class="acc-group open" data-settings-section="general">
+        <div class="acc-head">General <span class="chev">&#8964;</span></div>
         <div class="acc-body"><div class="acc-inner">
           <div class="setting-row">
             <label for="interval">Refresh every</label>
             <input id="interval" type="number" min="1" max="120" value="5" /> <span class="unit">min</span>
           </div>
           <div class="setting-row">
-            <label class="toggle"><input id="autostart" type="checkbox" /> Start with Windows</label>
+            <label class="toggle"><span>Start with Windows</span><input id="autostart" type="checkbox" /></label>
           </div>
           <div class="setting-row">
-            <label class="toggle"><input id="pacing" type="checkbox" /> Always show pacing</label>
+            <label class="toggle"><span>Always show pacing</span><input id="pacing" type="checkbox" /></label>
           </div>
           <div class="setting-row">
             <label for="pinned">Tray icon shows</label>
@@ -144,13 +150,13 @@
             </select>
           </div>
           <div class="setting-row">
-            <label class="toggle"><input id="density" type="checkbox" /> Compact layout</label>
+            <label class="toggle"><span>Compact layout</span><input id="density" type="checkbox" /></label>
           </div>
           <div class="setting-row">
-            <label class="toggle" title="Turn off on slower PCs — replaces the glass refraction with a simple solid look"><input id="glass" type="checkbox" /> Liquid glass effects</label>
+            <label class="toggle" title="Turn off on slower PCs — replaces the glass refraction with a simple solid look"><span>Liquid glass effects</span><input id="glass" type="checkbox" /></label>
           </div>
           <div class="setting-row">
-            <label class="toggle"><input id="show-total-spend" type="checkbox" /> Show Total Spend card</label>
+            <label class="toggle"><span>Show Total Spend card</span><input id="show-total-spend" type="checkbox" /></label>
           </div>
           <div class="setting-row">
             <label for="shortcut">Global shortcut</label>
@@ -159,26 +165,26 @@
         </div></div>
       </div>
 
-      <div class="acc-group">
-        <button class="acc-head">Notifications <span class="chev">&#8964;</span></button>
+      <div class="acc-group" data-settings-section="notifications">
+        <div class="acc-head">Notifications <span class="chev">&#8964;</span></div>
         <div class="acc-body"><div class="acc-inner">
           <p class="settings-note">
             Windows toasts when a quota worsens — once per metric per reset period.
           </p>
           <div class="setting-row">
-            <label class="toggle"><input id="notify-almost" type="checkbox" /> Almost out (&lt;10% left)</label>
+            <label class="toggle"><span>Almost out (&lt;10% left)</span><input id="notify-almost" type="checkbox" /></label>
           </div>
           <div class="setting-row">
-            <label class="toggle"><input id="notify-close" type="checkbox" /> Cutting it close</label>
+            <label class="toggle"><span>Cutting it close</span><input id="notify-close" type="checkbox" /></label>
           </div>
           <div class="setting-row">
-            <label class="toggle"><input id="notify-runout" type="checkbox" /> Will run out</label>
+            <label class="toggle"><span>Will run out</span><input id="notify-runout" type="checkbox" /></label>
           </div>
         </div></div>
       </div>
 
-      <div class="acc-group">
-        <button class="acc-head">Privacy <span class="chev">&#8964;</span></button>
+      <div class="acc-group" data-settings-section="privacy">
+        <div class="acc-head">Privacy <span class="chev">&#8964;</span></div>
         <div class="acc-body"><div class="acc-inner">
           <p class="settings-note">
             One anonymous "alive today" ping and per-provider success/failure
@@ -187,18 +193,18 @@
             docs/privacy.md.
           </p>
           <div class="setting-row">
-            <label class="toggle"><input id="telemetry" type="checkbox" /> Share anonymous usage statistics</label>
+            <label class="toggle"><span>Share anonymous usage statistics</span><input id="telemetry" type="checkbox" /></label>
           </div>
           <div class="setting-row">
-            <label class="toggle"><input id="privacy-mode" type="checkbox" /> Exclude OpenMeter from screen capture</label>
+            <label class="toggle"><span>Exclude OpenMeter from screen capture</span><input id="privacy-mode" type="checkbox" /></label>
           </div>
           <p class="settings-note">Global toggle: Ctrl+Shift+P. Tray numbers are hidden while enabled.</p>
           <button id="copy-diagnostics" type="button">Copy redacted diagnostics</button>
         </div></div>
       </div>
 
-      <div class="acc-group">
-        <button class="acc-head">Sync <span class="chev">&#8964;</span></button>
+      <div class="acc-group" data-settings-section="sync">
+        <div class="acc-head">Sync <span class="chev">&#8964;</span></div>
         <div class="acc-body"><div class="acc-inner">
           <p class="settings-note">
             End-to-end encrypted history sync through your Mini PC on Tailscale. The hub stores ciphertext only.
@@ -236,11 +242,11 @@
         </div></div>
       </div>
 
-      <div class="acc-group">
-        <button class="acc-head">Network <span class="chev">&#8964;</span></button>
+      <div class="acc-group" data-settings-section="network">
+        <div class="acc-head">Network <span class="chev">&#8964;</span></div>
         <div class="acc-body"><div class="acc-inner">
           <div class="setting-row">
-            <label class="toggle"><input id="proxy-enabled" type="checkbox" /> Use proxy</label>
+            <label class="toggle"><span>Use proxy</span><input id="proxy-enabled" type="checkbox" /></label>
           </div>
           <div class="setting-row">
             <label for="proxy-url">Proxy URL</label>
@@ -253,31 +259,31 @@
         </div></div>
       </div>
 
-      <div class="acc-group">
-        <button class="acc-head">Updates <span class="chev">&#8964;</span></button>
+      <div class="acc-group" data-settings-section="updates">
+        <div class="acc-head">Updates <span class="chev">&#8964;</span></div>
         <div class="acc-body"><div class="acc-inner">
           <div class="setting-row">
-            <label class="toggle"><input name="update-channel" value="stable" type="radio" /> Stable releases</label>
+            <label class="toggle"><span>Stable releases</span><input name="update-channel" value="stable" type="radio" /></label>
           </div>
           <div class="setting-row">
-            <label class="toggle"><input name="update-channel" value="beta" type="radio" /> Beta releases</label>
+            <label class="toggle"><span>Beta releases</span><input name="update-channel" value="beta" type="radio" /></label>
           </div>
           <p class="settings-note">Beta receives preview builds and also upgrades to newer stable releases.</p>
         </div></div>
       </div>
 
-      <div class="acc-group">
-        <button class="acc-head">Advanced <span class="chev">&#8964;</span></button>
+      <div class="acc-group" data-settings-section="advanced">
+        <div class="acc-head">Advanced <span class="chev">&#8964;</span></div>
         <div class="acc-body"><div class="acc-inner">
           <div class="setting-row">
-            <label class="toggle"><input id="allow-browser-cors" type="checkbox" /> Allow browser pages to read local API</label>
+            <label class="toggle"><span>Allow browser pages to read local API</span><input id="allow-browser-cors" type="checkbox" /></label>
           </div>
           <p class="settings-note" id="browser-cors-warning"></p>
         </div></div>
       </div>
 
-      <div class="acc-group">
-        <button class="acc-head">Accounts <span class="chev">&#8964;</span></button>
+      <div class="acc-group" data-settings-section="accounts">
+        <div class="acc-head">Accounts <span class="chev">&#8964;</span></div>
         <div class="acc-body"><div class="acc-inner">
           <p class="settings-note">
             Add an isolated Claude Code or Codex CLI profile. Each profile gets
@@ -297,8 +303,8 @@
         </div></div>
       </div>
 
-      <div class="acc-group">
-        <button class="acc-head">API keys <span class="chev">&#8964;</span></button>
+      <div class="acc-group" data-settings-section="api-keys">
+        <div class="acc-head">API keys <span class="chev">&#8964;</span></div>
         <div class="acc-body"><div class="acc-inner">
           <p class="settings-note">
             Stored only on this PC (%APPDATA%\OpenMeter). Leave empty and save to remove.
@@ -349,6 +355,9 @@
             <button data-save="aihubmix">Save</button>
           </div>
         </div></div>
+      </div>
+
+        </div>
       </div>
 
       <button id="changelog-btn" type="button">

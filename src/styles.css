@@ -2411,3 +2411,413 @@ body.no-glass #confirm-box {
     transition: none;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Dedicated settings workspace
+
+   Settings are intentionally roomier than the tray dashboard. The dashboard
+   remains a fast glance; this page is where people make deliberate choices.
+--------------------------------------------------------------------------- */
+
+#settings {
+  padding: 72px 24px 32px;
+}
+
+#settings .panel-head.glass-bar {
+  max-width: 1040px;
+  margin: 0 auto 20px;
+  padding: 10px 14px;
+  justify-content: flex-start;
+}
+
+#settings .panel-head.glass-bar .panel-title {
+  display: block;
+  margin: 0;
+  text-align: left;
+  font-size: 19px;
+  line-height: 1.15;
+  letter-spacing: -0.025em;
+}
+
+.panel-eyebrow,
+.settings-nav-kicker {
+  display: block;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.settings-shell {
+  display: grid;
+  grid-template-columns: 232px minmax(0, 1fr);
+  gap: 22px;
+  align-items: start;
+  max-width: 1040px;
+  min-height: calc(100vh - 126px);
+  margin: 0 auto;
+}
+
+.settings-nav {
+  position: sticky;
+  top: 0;
+  min-width: 0;
+  padding: 15px 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--card) 82%, transparent);
+}
+
+.settings-nav-intro {
+  margin: 6px 6px 15px;
+  color: var(--muted-foreground);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.settings-nav-list {
+  display: grid;
+  gap: 3px;
+}
+
+.settings-nav-item {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: center;
+  width: 100%;
+  min-height: 48px;
+  padding: 7px 8px;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  background: transparent;
+  color: var(--secondary-foreground);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease,
+    transform 0.16s ease;
+}
+
+.settings-nav-item:hover {
+  background: var(--accent);
+  color: var(--foreground);
+}
+
+.settings-nav-item:active {
+  transform: scale(0.985);
+}
+
+.settings-nav-item.active {
+  border-color: color-mix(in srgb, var(--chart-blue) 35%, var(--border));
+  background: color-mix(in srgb, var(--chart-blue) 15%, var(--card));
+  color: var(--foreground);
+}
+
+.settings-nav-icon {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: 7px;
+  color: var(--muted-foreground);
+  font-size: 16px;
+  line-height: 1;
+}
+
+.settings-nav-item.active .settings-nav-icon {
+  background: color-mix(in srgb, var(--chart-blue) 22%, transparent);
+  color: var(--chart-blue);
+}
+
+.settings-nav-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.settings-nav-label {
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.2;
+}
+
+.settings-nav-description {
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-content {
+  min-width: 0;
+  max-width: 760px;
+  padding-bottom: 24px;
+}
+
+#settings .acc-group[hidden] {
+  display: none;
+}
+
+#settings .acc-group {
+  margin: 0;
+  overflow: visible;
+  border-radius: 17px;
+  background: color-mix(in srgb, var(--card) 86%, transparent);
+}
+
+#settings .acc-head {
+  padding: 20px 22px 5px;
+  color: var(--foreground);
+  font-size: 20px;
+  font-weight: 680;
+  letter-spacing: -0.03em;
+  text-align: left;
+  text-transform: none;
+  cursor: default;
+}
+
+#settings .acc-head:hover {
+  background: transparent;
+}
+
+#settings .acc-head .chev {
+  display: none;
+}
+
+#settings .settings-section-description {
+  margin: 0;
+  padding: 0 22px 17px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+#settings .acc-body {
+  grid-template-rows: 1fr;
+}
+
+#settings .acc-inner,
+#settings .acc-group.open .acc-inner {
+  overflow: visible;
+  padding: 15px 22px 22px;
+}
+
+#settings .settings-note {
+  max-width: 70ch;
+  margin: 0 0 13px;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+#settings .setting-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.72fr) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px 14px;
+  min-height: 45px;
+  margin: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  color: var(--secondary-foreground);
+}
+
+#settings .setting-row:last-child {
+  border-bottom: none;
+}
+
+#settings .setting-row > label:not(.toggle) {
+  grid-column: 1;
+  color: var(--foreground);
+  font-size: 12.5px;
+  font-weight: 560;
+}
+
+#settings .setting-row > input:not([type="checkbox"]),
+#settings .setting-row > select {
+  grid-column: 2;
+  width: 100%;
+  min-width: 0;
+  min-height: 32px;
+  background: var(--background);
+}
+
+#settings .setting-row > .unit {
+  grid-column: 3;
+  margin-left: -9px;
+}
+
+#settings .setting-row > .toggle {
+  grid-column: 1 / -1;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 44px;
+  color: var(--foreground);
+  font-size: 12.5px;
+}
+
+#settings .setting-row > button {
+  grid-column: 3;
+  white-space: nowrap;
+}
+
+#settings #interval {
+  width: 86px;
+}
+
+#settings #sync-now,
+#settings #sync-revoke,
+#settings #sync-disable {
+  grid-column: auto;
+}
+
+#settings .setting-row:has(> #sync-now) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 14px;
+}
+
+#settings .key-row {
+  display: grid;
+  grid-template-columns: 125px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 46px;
+  margin: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+}
+
+#settings .key-row:last-child {
+  border-bottom: none;
+}
+
+#settings .key-row label {
+  width: auto;
+  color: var(--foreground);
+  font-size: 12.5px;
+  font-weight: 560;
+}
+
+#settings .acc-inner > button,
+#settings .acc-inner .key-row button,
+#settings .acc-inner .account-editor button,
+#settings .acc-inner .setting-row > button {
+  min-height: 31px;
+  padding: 6px 11px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--muted);
+  color: var(--foreground);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+
+#settings .acc-inner > button:hover,
+#settings .acc-inner .key-row button:hover,
+#settings .acc-inner .account-editor button:hover,
+#settings .acc-inner .setting-row > button:hover {
+  border-color: color-mix(in srgb, var(--chart-blue) 42%, var(--border));
+  background: color-mix(in srgb, var(--chart-blue) 16%, var(--muted));
+}
+
+#settings .acc-inner > button:active,
+#settings .acc-inner .key-row button:active,
+#settings .acc-inner .account-editor button:active,
+#settings .acc-inner .setting-row > button:active {
+  transform: scale(0.98);
+}
+
+#settings #sync-disable,
+#settings #sync-revoke {
+  border-color: color-mix(in srgb, var(--destructive) 35%, var(--border));
+  color: color-mix(in srgb, var(--destructive) 75%, var(--foreground));
+}
+
+#settings #changelog-btn {
+  display: block;
+  max-width: 760px;
+  margin: 16px auto 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--card);
+  color: var(--secondary-foreground);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.2;
+  text-align: left;
+  cursor: pointer;
+}
+
+#settings #changelog-btn:hover {
+  background: var(--accent);
+  color: var(--foreground);
+}
+
+#settings > .settings-note {
+  max-width: 760px;
+  margin: 14px auto 0;
+  padding: 0 2px;
+}
+
+@media (max-width: 700px) {
+  #settings {
+    padding: 14px 14px 24px;
+  }
+
+  .settings-shell {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .settings-nav {
+    position: relative;
+    padding: 10px;
+  }
+
+  .settings-nav-intro,
+  .settings-nav-description {
+    display: none;
+  }
+
+  .settings-nav-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .settings-nav-item {
+    min-height: 38px;
+    grid-template-columns: 24px minmax(0, 1fr);
+  }
+
+  #settings .setting-row,
+  #settings .key-row {
+    grid-template-columns: 1fr;
+    gap: 6px;
+    padding: 11px 0;
+  }
+
+  #settings .setting-row > label:not(.toggle),
+  #settings .setting-row > input:not([type="checkbox"]),
+  #settings .setting-row > select,
+  #settings .setting-row > button,
+  #settings .key-row label,
+  #settings .key-row input,
+  #settings .key-row button {
+    grid-column: 1;
+    width: 100%;
+    margin: 0;
+  }
+
+  #settings .setting-row > .unit {
+    display: none;
+  }
+}

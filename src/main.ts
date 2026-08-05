@@ -2,6 +2,7 @@ import "./browser-preview";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
+import { getCurrentWindow, LogicalSize, PhysicalPosition } from "@tauri-apps/api/window";
 import type { Metric, Snapshot, UpdateChannel } from "./models";
 import { snapshotProviderId } from "./models";
 import { selectAggregateSpend } from "./aggregate-spend";
@@ -23,6 +24,10 @@ import {
   shortDeviceRef,
   type SyncStatus,
 } from "./sync-settings";
+import {
+  normalizeSettingsSection,
+  renderSettingsNav,
+} from "./settings-navigation";
 import {
   buildTrackingSeries,
   filterTracking,
@@ -3022,6 +3027,87 @@ async function initSettings(): Promise<void> {
   await initSyncSettings();
 }
 
+const DASHBOARD_WINDOW_SIZE = new LogicalSize(380, 600);
+const SETTINGS_WINDOW_SIZE = new LogicalSize(860, 720);
+let dashboardWindowPosition: { x: number; y: number } | null = null;
+let settingsWindowResize = Promise.resolve();
+
+function resizeWindowForSettings(open: boolean): void {
+  settingsWindowResize = settingsWindowResize
+    .then(async () => {
+      const appWindow = getCurrentWindow();
+      try {
+        if (open) {
+          const position = await appWindow.outerPosition();
+          dashboardWindowPosition = { x: position.x, y: position.y };
+          await appWindow.setSize(SETTINGS_WINDOW_SIZE);
+          await appWindow.center();
+        } else {
+          await appWindow.setSize(DASHBOARD_WINDOW_SIZE);
+          if (dashboardWindowPosition) {
+            await appWindow.setPosition(
+              new PhysicalPosition(dashboardWindowPosition.x, dashboardWindowPosition.y),
+            );
+          }
+        }
+      } catch {
+        // Browser preview and older WebView builds do not expose window sizing.
+      }
+    })
+    .catch(() => {});
+}
+
+function setupSettingsNavigation(): void {
+  const slot = document.querySelector<HTMLElement>("#settings-nav-slot");
+  const settings = document.querySelector<HTMLElement>("#settings");
+  if (!slot || !settings) return;
+
+  slot.innerHTML = renderSettingsNav("general");
+  const groups = Array.from(
+    settings.querySelectorAll<HTMLElement>("[data-settings-section]"),
+  );
+  const navItems = Array.from(slot.querySelectorAll<HTMLButtonElement>("[data-settings-nav]"));
+
+  for (const group of groups) {
+    const sectionId = group.dataset.settingsSection;
+    const heading = group.querySelector<HTMLElement>(".acc-head");
+    const description = navItems
+      .find((item) => item.dataset.settingsNav === sectionId)
+      ?.querySelector<HTMLElement>(".settings-nav-description")
+      ?.textContent;
+    if (heading && description && !group.querySelector(".settings-section-description")) {
+      const hint = document.createElement("p");
+      hint.className = "settings-section-description";
+      hint.textContent = description;
+      heading.insertAdjacentElement("afterend", hint);
+    }
+  }
+
+  const activate = (value: unknown): void => {
+    const active = normalizeSettingsSection(value);
+    for (const group of groups) {
+      const selected = group.dataset.settingsSection === active;
+      group.hidden = !selected;
+      group.classList.toggle("settings-active", selected);
+      if (selected) group.classList.add("open");
+      group.setAttribute("aria-hidden", String(!selected));
+    }
+    for (const item of navItems) {
+      const selected = item.dataset.settingsNav === active;
+      item.classList.toggle("active", selected);
+      item.setAttribute("aria-current", selected ? "page" : "false");
+    }
+    settings.scrollTo({ top: 0 });
+  };
+
+  slot.addEventListener("click", (event) => {
+    const item = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-settings-nav]");
+    if (item) activate(item.dataset.settingsNav);
+  });
+
+  activate("general");
+}
+
 // ---------------------------------------------------------------------------
 // Boot
 // ---------------------------------------------------------------------------
@@ -3081,9 +3167,13 @@ window.addEventListener("DOMContentLoaded", () => {
   });
 
   const setSettings = (open: boolean) => {
+    const alreadyOpen = document.body.classList.contains("settings-open");
+    if (alreadyOpen === open) return;
     document.body.classList.toggle("settings-open", open);
     document.querySelector("#settings-btn")?.classList.toggle("active", open);
+    resizeWindowForSettings(open);
   };
+  setupSettingsNavigation();
   document.querySelector("#settings-btn")!.addEventListener("click", () => {
     setDrawer(false);
     setSettings(!document.body.classList.contains("settings-open"));
@@ -3092,9 +3182,6 @@ window.addEventListener("DOMContentLoaded", () => {
   document.querySelector("#changelog-btn")!.addEventListener("click", () => {
     setSettings(false);
     showChangelogDialog("Changelog", parseChangelog());
-  });
-  document.querySelectorAll<HTMLElement>(".acc-head").forEach((head) => {
-    head.addEventListener("click", () => head.parentElement!.classList.toggle("open"));
   });
   document.querySelector("#customize-btn")!.addEventListener("click", () => {
     setSettings(false);
